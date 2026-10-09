@@ -4,6 +4,31 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
+enum class WorkerProfileStatus(val labelFrench: String) {
+    ACTIVE("Active"),
+    ARCHIVED("Archivée"),
+    PENDING_SAVE("Brouillon"),
+    CONFLICT("Conflit à vérifier"),
+    READ_ONLY("Lecture seule")
+}
+
+data class WorkerDraft(
+    val firstName: String = "",
+    val lastName: String = "",
+    val role: String = "Piqueuse",
+    val rateInput: String = "6.500",
+    val hireDateIso: String = "",
+    val notes: String = ""
+) {
+    val isNotEmpty: Boolean
+        get() = firstName.isNotBlank() || lastName.isNotBlank() || notes.isNotBlank() || rateInput.isNotBlank() && rateInput != "6.500"
+}
+
+fun normalizeForFrenchSearch(text: String): String {
+    val normalized = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+    return "\\p{InCombiningDiacriticalMarks}+".toRegex().replace(normalized, "").lowercase(Locale.ROOT).trim()
+}
+
 /**
  * Worker profile representation.
  * Money is stored in exact integer minor units (millimes: 1 TND = 1000 millimes)
@@ -17,6 +42,7 @@ data class Worker(
     val currentRateMillimes: Long,
     val role: String,
     val isActive: Boolean = true,
+    val profileStatus: WorkerProfileStatus = if (isActive) WorkerProfileStatus.ACTIVE else WorkerProfileStatus.ARCHIVED,
     val hireDateIso: String = "2026-01-15",
     val returnDateIso: String? = null,
     val archivedDateIso: String? = null,

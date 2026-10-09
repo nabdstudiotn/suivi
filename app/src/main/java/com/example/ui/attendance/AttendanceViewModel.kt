@@ -49,7 +49,10 @@ data class AttendanceUiState(
     val canGoForward: Boolean = true,
     val announcements: List<Announcement> = emptyList(),
     val payrollBreakdowns: Map<String, WorkerPayrollBreakdown> = emptyMap(),
-    val currentPayrollMonth: String = AtelierDate.todayTunis().yearMonthIso
+    val currentPayrollMonth: String = AtelierDate.todayTunis().yearMonthIso,
+    val workerDraft: com.example.domain.model.WorkerDraft? = null,
+    val teamSearchQuery: String = "",
+    val teamFilterStatus: com.example.domain.model.WorkerProfileStatus? = null
 ) {
     /**
      * Active operators strictly filtered by effective employment period on currentDate.
@@ -381,6 +384,22 @@ class AttendanceViewModel(
         _uiState.value = _uiState.value.copy(showAddWorkerDialog = false)
     }
 
+    fun saveWorkerDraft(draft: com.example.domain.model.WorkerDraft) {
+        _uiState.value = _uiState.value.copy(workerDraft = draft)
+    }
+
+    fun clearWorkerDraft() {
+        _uiState.value = _uiState.value.copy(workerDraft = null)
+    }
+
+    fun setTeamSearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(teamSearchQuery = query)
+    }
+
+    fun setTeamFilterStatus(status: com.example.domain.model.WorkerProfileStatus?) {
+        _uiState.value = _uiState.value.copy(teamFilterStatus = status)
+    }
+
     fun addWorker(
         firstName: String,
         lastName: String,
@@ -390,12 +409,13 @@ class AttendanceViewModel(
     ) {
         viewModelScope.launch {
             repository.addWorker(
-                firstName = firstName,
-                lastName = lastName,
-                role = role,
+                firstName = firstName.trim(),
+                lastName = lastName.trim(),
+                role = role.trim(),
                 hourlyRateMillimes = hourlyRateMillimes,
-                hireDateIso = hireDateIso
+                hireDateIso = hireDateIso.trim()
             )
+            clearWorkerDraft()
             closeAddWorkerDialog()
         }
     }

@@ -13,4 +13,24 @@ class ExampleUnitTest {
   fun addition_isCorrect() {
     assertEquals(4, 2 + 2)
   }
+
+  @Test
+  fun testNormalizeForFrenchSearch() {
+    val input = "Hélène Chérif"
+    val normalized = com.example.domain.model.normalizeForFrenchSearch(input)
+    assertEquals("helene cherif", normalized)
+
+    val inputAccents = "Élodie Çois"
+    assertEquals("elodie cois", com.example.domain.model.normalizeForFrenchSearch(inputAccents))
+  }
+
+  @Test
+  fun testWorkerProfileStatusLabels() {
+    assertEquals("Active", com.example.domain.model.WorkerProfileStatus.ACTIVE.labelFrench)
+    assertEquals("Archivée", com.example.domain.model.WorkerProfileStatus.ARCHIVED.labelFrench)
+    assertEquals("Brouillon", com.example.domain.model.WorkerProfileStatus.PENDING_SAVE.labelFrench)
+    assertEquals("Conflit à vérifier", com.example.domain.model.WorkerProfileStatus.CONFLICT.labelFrench)
+    assertEquals("Lecture seule", com.example.domain.model.WorkerProfileStatus.READ_ONLY.labelFrench)
+  }
 }
+

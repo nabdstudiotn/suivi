@@ -21,11 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Note
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -35,6 +35,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,9 +65,9 @@ import com.example.ui.theme.NabdSurfaceSubtle
 import com.example.ui.theme.NabdSurfaceWhite
 
 /**
- * Worker profile detail screen:
+ * Worker profile detail screen (Section 2 - Équipe):
  * Displays single continuous profile, effective hourly rates, return dates,
- * and direct entry point to the worker's personal monthly archive.
+ * internal immutable ID, and direct entry point to the worker's personal monthly archive.
  */
 @Composable
 fun WorkerProfileScreen(
@@ -76,6 +80,8 @@ fun WorkerProfileScreen(
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onBack)
+
+    var showArchiveConfirmDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -160,28 +166,39 @@ fun WorkerProfileScreen(
                                 )
                             }
 
-                            // Active / Archived badge
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (worker.isActive) NabdMintBackground else NabdCoralBackground)
-                                    .border(
-                                        1.dp,
-                                        if (worker.isActive) NabdMintBorder else NabdCoralBorder,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            StatusBadge(status = worker.profileStatus)
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Internal UUID identifier (Not dependent on name)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(NabdSurfaceSubtle)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (worker.isActive) "Active" else "Archivée",
-                                    color = if (worker.isActive) NabdMintText else NabdCoralText,
+                                    text = "Identifiant système interne",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    color = NabdMineralGray
+                                )
+                                Text(
+                                    text = "UUID: ${worker.id.take(8)}...",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = NabdMineralGray
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // Dates metadata
                         Row(
@@ -202,6 +219,22 @@ fun WorkerProfileScreen(
                                 )
                             }
 
+                            if (worker.archivedDateIso != null) {
+                                Column {
+                                    Text(
+                                        text = "Date d'archivage",
+                                        fontSize = 11.sp,
+                                        color = NabdMineralGray
+                                    )
+                                    Text(
+                                        text = worker.archivedDateIso,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = NabdCoralText
+                                    )
+                                }
+                            }
+
                             if (worker.returnDateIso != null) {
                                 Column {
                                     Text(
@@ -214,6 +247,42 @@ fun WorkerProfileScreen(
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = NabdPurple
+                                    )
+                                }
+                            }
+                        }
+
+                        // Workshop notes if present
+                        if (!worker.notes.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(NabdBone)
+                                    .padding(10.dp)
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Note,
+                                            contentDescription = null,
+                                            tint = NabdMineralGray,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Notes d'atelier :",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NabdMineralGray
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = worker.notes,
+                                        fontSize = 12.sp,
+                                        color = NabdObsidian
                                     )
                                 }
                             }
@@ -247,7 +316,7 @@ fun WorkerProfileScreen(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = worker.rateFormattedTnd,
+                                    text = "${worker.rateFormattedTnd}/h",
                                     fontSize = 24.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = NabdDeepViolet
@@ -355,7 +424,7 @@ fun WorkerProfileScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Consulter les archives de travail",
+                            text = "Consulter les archives de pointage",
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -364,7 +433,7 @@ fun WorkerProfileScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedButton(
-                    onClick = { onToggleActiveStatus(worker) },
+                    onClick = { showArchiveConfirmDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(46.dp)
@@ -383,5 +452,55 @@ fun WorkerProfileScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
+    }
+
+    // Confirmation dialog before changing active / archive status
+    if (showArchiveConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showArchiveConfirmDialog = false },
+            icon = {
+                Icon(
+                    imageVector = if (worker.isActive) Icons.Default.Warning else Icons.Default.Info,
+                    contentDescription = null,
+                    tint = if (worker.isActive) NabdCoralText else NabdPurple
+                )
+            },
+            title = {
+                Text(
+                    text = if (worker.isActive) "Archiver l'ouvrière" else "Réactiver l'ouvrière",
+                    fontWeight = FontWeight.Bold,
+                    color = NabdObsidian
+                )
+            },
+            text = {
+                Text(
+                    text = if (worker.isActive)
+                        "L'archivage marque la fin de la période d'activité courante. Tous les pointages, paiements et taux historiques restent strictement conservés et consultables dans les archives."
+                    else
+                        "La réactivation enregistre une reprise d'activité effective à partir d'aujourd'hui. L'ouvrière réapparaîtra dans la liste des pointages journaliers.",
+                    fontSize = 13.sp,
+                    color = NabdMineralGray
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showArchiveConfirmDialog = false
+                        onToggleActiveStatus(worker)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (worker.isActive) Color(0xFFDC2626) else NabdPurple,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(if (worker.isActive) "Confirmer l'archivage" else "Confirmer la réactivation")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showArchiveConfirmDialog = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
     }
 }

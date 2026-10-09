@@ -174,7 +174,14 @@ fun SuiviApp(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "• Pointage du jour",
+                                    text = when (state.currentSection) {
+                                        AtelierSection.POINTAGE -> "• Pointage du jour"
+                                        AtelierSection.EQUIPE -> "• Équipe d'atelier"
+                                        AtelierSection.PAIE -> "• Paie & Règlements"
+                                        AtelierSection.COMMUNICATION -> "• Communication"
+                                        AtelierSection.ARCHIVES -> "• Archives de travail"
+                                        AtelierSection.PARAMETRES -> "• Paramètres"
+                                    },
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = NabdPurple
@@ -267,8 +274,63 @@ fun SuiviApp(
                     )
                 }
 
+                AtelierSection.EQUIPE -> {
+                    if (state.selectedProfileWorker != null) {
+                        WorkerProfileScreen(
+                            worker = state.selectedProfileWorker!!,
+                            rateHistory = state.workerRateHistory,
+                            onBack = { viewModel.closeWorkerProfile() },
+                            onViewWorkerArchive = { worker -> viewModel.openWorkerArchive(worker) },
+                            onToggleActiveStatus = { worker -> viewModel.toggleWorkerActiveStatus(worker) },
+                            onAddRateClicked = { worker -> viewModel.openAddRateDialog(worker) }
+                        )
+                    } else {
+                        TeamScreen(
+                            workers = state.allWorkers,
+                            onWorkerClicked = { worker -> viewModel.openWorkerProfile(worker) },
+                            onAddWorkerClicked = { viewModel.openAddWorkerDialog() }
+                        )
+                    }
+                }
+
+                AtelierSection.ARCHIVES -> {
+                    ArchivesScreen(
+                        workerFilter = state.selectedArchiveWorker,
+                        workedMonths = state.workedMonthsSummaries,
+                        onBack = { viewModel.closeWorkerArchive() }
+                    )
+                }
+
+                AtelierSection.PAIE -> {
+                    PayrollScreen(
+                        currentMonthIso = state.currentPayrollMonth,
+                        workers = state.allWorkers,
+                        breakdowns = state.payrollBreakdowns,
+                        onRecordAdvance = { workerId, amount, motif ->
+                            viewModel.recordAdvance(workerId, amount, motif)
+                        },
+                        onRecordAdjustment = { type, workerId, amount, motif, note ->
+                            viewModel.recordAdjustment(type, workerId, amount, motif, note)
+                        },
+                        onRecordPayment = { workerId, amount, method, note ->
+                            viewModel.recordPayment(workerId, amount, method, note)
+                        }
+                    )
+                }
+
+                AtelierSection.COMMUNICATION -> {
+                    CommunicationScreen(
+                        announcements = state.announcements,
+                        onCreateAnnouncement = { title, content, audience, exp ->
+                            viewModel.createAnnouncement(title, content, audience, exp)
+                        },
+                        onDeleteAnnouncement = { id ->
+                            viewModel.deleteAnnouncement(id)
+                        }
+                    )
+                }
+
                 else -> {
-                    // Secondary sections are out of scope for Section 1 (Pointage) per 06_pointage_scope.md
                     PlaceholderSectionScreen(
                         section = state.currentSection,
                         onBackToPointage = { viewModel.selectSection(AtelierSection.POINTAGE) }
@@ -296,10 +358,14 @@ fun SuiviApp(
                 )
             }
 
-            // Real Add Worker Dialog
+            // Real Add Worker Dialog with Draft & Duplicate Review
             if (state.showAddWorkerDialog) {
                 AddWorkerDialog(
+                    initialDraft = state.workerDraft,
+                    existingWorkers = state.allWorkers,
                     onDismiss = { viewModel.closeAddWorkerDialog() },
+                    onSaveDraft = { draft -> viewModel.saveWorkerDraft(draft) },
+                    onDiscardDraft = { viewModel.clearWorkerDraft() },
                     onConfirm = { fn, ln, r, rm, hd -> viewModel.addWorker(fn, ln, r, rm, hd) }
                 )
             }
