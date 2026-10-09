@@ -1,0 +1,154 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val <= request.time;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId == userId &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 128 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.role in ['admin', 'manager', 'supervisor', 'worker'] &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidWorker(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 60 &&
+        data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 60 &&
+        (!('cin' in data) || (data.cin is string && data.cin.size() <= 20)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 30)) &&
+        data.role is string && data.role.size() >= 1 && data.role.size() <= 60 &&
+        data.startDateIso is string && data.startDateIso.size() == 10 &&
+        data.isActive is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAttendanceEntry(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.workerId is string && data.workerId.size() >= 1 && data.workerId.size() <= 64 &&
+        data.dateIso is string && data.dateIso.size() == 10 &&
+        data.status in ['WORKED', 'ABSENT', 'REST_DAY', 'TO_FILL'] &&
+        data.minutesWorked is int && data.minutesWorked >= 0 && data.minutesWorked <= 1440 &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 500)) &&
+        (!('recordedBy' in data) || (data.recordedBy is string && data.recordedBy.size() <= 100)) &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidHourlyRateRecord(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.workerId is string && data.workerId.size() >= 1 && data.workerId.size() <= 64 &&
+        data.effectiveDateIso is string && data.effectiveDateIso.size() == 10 &&
+        data.hourlyRateMillimes is int && data.hourlyRateMillimes >= 0 &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidAdvancePayment(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.workerId is string && data.workerId.size() >= 1 && data.workerId.size() <= 64 &&
+        data.dateIso is string && data.dateIso.size() == 10 &&
+        data.amountMillimes is int && data.amountMillimes >= 0 &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 300)) &&
+        (!('recordedBy' in data) || (data.recordedBy is string && data.recordedBy.size() <= 100)) &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidPayrollAdjustment(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.workerId is string && data.workerId.size() >= 1 && data.workerId.size() <= 64 &&
+        data.monthIso is string && data.monthIso.size() == 7 &&
+        data.type in ['BONUS', 'PENALTY', 'OVERTIME', 'OTHER'] &&
+        data.amountMillimes is int && data.amountMillimes >= 0 &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 300)) &&
+        (!('recordedBy' in data) || (data.recordedBy is string && data.recordedBy.size() <= 100)) &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidSettledPayment(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.workerId is string && data.workerId.size() >= 1 && data.workerId.size() <= 64 &&
+        data.monthIso is string && data.monthIso.size() == 7 &&
+        data.amountMillimes is int && data.amountMillimes >= 0 &&
+        data.paymentMethod in ['ESPECES', 'VIREMENT', 'CHEQUE'] &&
+        data.paidBy is string && data.paidBy.size() >= 1 && data.paidBy.size() <= 100 &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidAnnouncement(data, userId) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.userId == userId &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.content is string && data.content.size() >= 1 && data.content.size() <= 1000 &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100 &&
+        data.isUrgent is bool &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUserProfile(request.resource.data, userId);
+      allow delete: if isOwner(userId);
+
+      match /workers/{workerId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidWorker(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /attendance/{attendanceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidAttendanceEntry(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /rates/{rateId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidHourlyRateRecord(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /advances/{advanceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidAdvancePayment(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /adjustments/{adjustmentId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidPayrollAdjustment(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /payments/{paymentId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidSettledPayment(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidAnnouncement(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

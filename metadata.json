@@ -1,0 +1,6 @@
+{
+  "name": "Suivi",
+  "description": "Application d'atelier textile : pointage quotidien, gestion d'équipe, archives et suivi de paie.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
