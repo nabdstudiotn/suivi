@@ -2,23 +2,37 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// NABD Studio design system: Warm matte surfaces, restrained purple, quiet depth
-val PurplePrimary = Color(0xFF6B4E8C)
-val PurpleDark = Color(0xFF4A3464)
-val PurpleLight = Color(0xFF9E7BB5)
-val PurpleSurface = Color(0xFFF7F4F9)
+// NABD Studio Visual Identity Tokens
+val NabdPurple = Color(0xFF6F4BFF)
+val NabdPurpleDark = Color(0xFF5535E0)
+val NabdPurpleLight = Color(0xFF8E70FF)
+val NabdDeepViolet = Color(0xFF382566)
 
-val MatteSurface = Color(0xFFF9F9FB)
-val MatteSurfaceContainer = Color(0xFFF1F0F5)
-val MatteSurfaceCard = Color(0xFFFFFFFF)
-val MatteBorder = Color(0xFFE4E1EC)
+// Neutral & Background Surface Tokens
+val NabdObsidian = Color(0xFF17151C)
+val NabdBone = Color(0xFFF4F1EA)
+val NabdSurfaceWhite = Color(0xFFFFFFFF)
+val NabdSurfaceSubtle = Color(0xFFEBE7DD)
+val NabdMineralGray = Color(0xFFAAA5AE)
+val NabdBorder = Color(0xFFDDD8CE)
 
-val TextPrimary = Color(0xFF1E1A22)
-val TextSecondary = Color(0xFF5D5765)
-val TextTertiary = Color(0xFF888292)
+// Operational Attendance Status Tokens
+// Worked hours: Mint tactile surface & dark green text
+val NabdMintBackground = Color(0xFFDDF1E7)
+val NabdMintText = Color(0xFF16533B)
+val NabdMintBorder = Color(0xFFB8E2CC)
 
-val StatusActive = Color(0xFF2E7D32)
-val StatusArchived = Color(0xFF757575)
-val StatusConflict = Color(0xFFC62828)
-val StatusWarning = Color(0xFFE65100)
-val StatusPending = Color(0xFF0277BD)
+// Absence (AB): Coral surface & deep rust text
+val NabdCoralBackground = Color(0xFFFFE1D7)
+val NabdCoralText = Color(0xFF8C2D18)
+val NabdCoralBorder = Color(0xFFF7BFB0)
+
+// Rest Day (Jour de repos): Soft calm lavender & deep violet text
+val NabdRestBackground = Color(0xFFE9E4F5)
+val NabdRestText = Color(0xFF453070)
+val NabdRestBorder = Color(0xFFD5CCEB)
+
+// Blank / Unrecorded: Tactile neutral surface & muted text
+val NabdBlankBackground = Color(0xFFF0ECE3)
+val NabdBlankText = Color(0xFF78737D)
+val NabdBlankBorder = Color(0xFFD8D2C5)

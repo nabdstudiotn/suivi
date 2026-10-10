@@ -1,0 +1,166 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and workshop access configuration",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "manager", "supervisor", "worker"] },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "email", "displayName", "role", "createdAt"]
+    },
+    "Worker": {
+      "title": "Worker",
+      "description": "Workshop worker details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "cin": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string" },
+        "startDateIso": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "firstName", "lastName", "role", "startDateIso", "isActive", "createdAt", "updatedAt"]
+    },
+    "AttendanceEntry": {
+      "title": "AttendanceEntry",
+      "description": "Daily attendance record for a worker",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "workerId": { "type": "string" },
+        "dateIso": { "type": "string" },
+        "status": { "type": "string", "enum": ["WORKED", "ABSENT", "REST_DAY", "TO_FILL"] },
+        "minutesWorked": { "type": "integer" },
+        "note": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "workerId", "dateIso", "status", "minutesWorked", "createdAt", "updatedAt"]
+    },
+    "HourlyRateRecord": {
+      "title": "HourlyRateRecord",
+      "description": "Historical or current hourly rate of a worker in millimes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "workerId": { "type": "string" },
+        "effectiveDateIso": { "type": "string" },
+        "hourlyRateMillimes": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "workerId", "effectiveDateIso", "hourlyRateMillimes", "createdAt"]
+    },
+    "AdvancePayment": {
+      "title": "AdvancePayment",
+      "description": "Salary advance payment record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "workerId": { "type": "string" },
+        "dateIso": { "type": "string" },
+        "amountMillimes": { "type": "integer" },
+        "reason": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "workerId", "dateIso", "amountMillimes", "createdAt"]
+    },
+    "PayrollAdjustment": {
+      "title": "PayrollAdjustment",
+      "description": "Monthly adjustment (bonus or deduction)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "workerId": { "type": "string" },
+        "monthIso": { "type": "string" },
+        "type": { "type": "string", "enum": ["BONUS", "PENALTY", "OVERTIME", "OTHER"] },
+        "amountMillimes": { "type": "integer" },
+        "reason": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "workerId", "monthIso", "type", "amountMillimes", "createdAt"]
+    },
+    "SettledPayment": {
+      "title": "SettledPayment",
+      "description": "Settled salary payment record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "workerId": { "type": "string" },
+        "monthIso": { "type": "string" },
+        "amountMillimes": { "type": "integer" },
+        "paymentMethod": { "type": "string", "enum": ["ESPECES", "VIREMENT", "CHEQUE"] },
+        "paidBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "workerId", "monthIso", "amountMillimes", "paymentMethod", "paidBy", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Workshop announcements and notices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "authorName": { "type": "string" },
+        "isUrgent": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "userId", "title", "content", "authorName", "isUrgent", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile with role and workshop access metadata"
+    },
+    "/users/{userId}/workers/{workerId}": {
+      "schema": "Worker",
+      "description": "Workers registered in this workshop"
+    },
+    "/users/{userId}/attendance/{attendanceId}": {
+      "schema": "AttendanceEntry",
+      "description": "Daily attendance logs for workers"
+    },
+    "/users/{userId}/rates/{rateId}": {
+      "schema": "HourlyRateRecord",
+      "description": "Hourly rate history for workers"
+    },
+    "/users/{userId}/advances/{advanceId}": {
+      "schema": "AdvancePayment",
+      "description": "Salary advance records"
+    },
+    "/users/{userId}/adjustments/{adjustmentId}": {
+      "schema": "PayrollAdjustment",
+      "description": "Monthly payroll bonus and deduction adjustments"
+    },
+    "/users/{userId}/payments/{paymentId}": {
+      "schema": "SettledPayment",
+      "description": "Settled monthly salary payments"
+    },
+    "/users/{userId}/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Workshop internal announcements and notices"
+    }
+  }
+}

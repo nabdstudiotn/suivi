@@ -1,0 +1,28 @@
+<resources>
+    <string name="app_name">Suivi</string>
+    <string name="section_pointage">Pointage</string>
+    <string name="section_archives">Archives</string>
+    <string name="section_equipe">Équipe</string>
+    <string name="section_paie">Paie</string>
+    <string name="section_annonces">Annonces</string>
+    <string name="section_discussions">Discussions</string>
+    <string name="section_parametres">Paramètres</string>
+    
+    <string name="state_blank">Non renseigné</string>
+    <string name="state_absence">AB (Absence)</string>
+    <string name="state_rest_day">Jour de repos</string>
+    <string name="state_worked">Heures travaillées</string>
+    <string name="sample_data_badge">Données locales d’exemple</string>
+    <string name="today">Aujourd’hui</string>
+    <string name="yesterday">Hier</string>
+    <string name="tomorrow_locked">Demain (Verrouillé)</string>
+    <string name="sunday_rest_notice">Dimanche — Jour de repos hebdomadaire</string>
+    <string name="edit_attendance_title">Saisie du pointage</string>
+    <string name="hours_label">Heures</string>
+    <string name="minutes_label">Minutes</string>
+    <string name="validate">Valider</string>
+    <string name="cancel">Annuler</string>
+    <string name="reset_to_blank">Effacer la saisie</string>
+    <string name="mark_as_ab">Marquer AB</string>
+    <string name="mark_as_repos">Jour de repos</string>
+</resources>
