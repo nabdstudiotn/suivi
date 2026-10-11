@@ -28,6 +28,7 @@ data class AttendanceUiState(
     val viewMode: AttendanceViewMode = AttendanceViewMode.JOUR,
     val isLoading: Boolean = false,
     val saveErrorMessage: String? = null,
+    val pointageCompletionMessage: String? = null,
     val showEffacerConfirmDialog: Boolean = false,
     val workerToEffacer: Pair<Worker, AtelierDate>? = null,
     val targetDateForEdit: AtelierDate? = null,
@@ -65,6 +66,59 @@ data class AttendanceUiState(
 
     fun activeWorkersFor(date: AtelierDate): List<Worker> =
         allWorkers.filter { it.isEmployedOn(date.isoString) }
+
+    /**
+     * Requirement 6: Pointage ordering.
+     * Place workers with fewer than 5 consecutive explicit AB workdays first, alphabetically,
+     * then workers with 5 or more consecutive explicit AB workdays at the bottom, alphabetically.
+     * Sunday REST_DAY and À renseigner do not count as absence.
+     * General lists (Équipe) remain purely alphabetical.
+     */
+    val pointageOrderedWorkers: List<Worker>
+        get() {
+            val active = activeWorkersForDate
+            val (regular, persistentAb) = active.partition { worker ->
+                consecutiveAbDaysFor(worker.id) < 5
+            }
+            val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
+            val comparator = Comparator<Worker> { a, b -> collator.compare(a.fullName, b.fullName) }
+            return regular.sortedWith(comparator) + persistentAb.sortedWith(comparator)
+        }
+
+    /**
+     * Calculates consecutive explicit AB workdays looking backward from currentDate.
+     * Sundays (automatic REST_DAY) and unrecorded (À renseigner) do not count as absence.
+     */
+    fun consecutiveAbDaysFor(workerId: String): Int {
+        var count = 0
+        var dateCursor = currentDate
+        for (i in 0 until 40) {
+            val key = "${workerId}_${dateCursor.isoString}"
+            val entry = if (dateCursor == currentDate) {
+                attendanceEntries[workerId] ?: monthAttendanceEntries[key]
+            } else {
+                monthAttendanceEntries[key]
+            }
+            if (dateCursor.isSunday) {
+                dateCursor = dateCursor.previousDay()
+                continue
+            }
+            val status = entry?.status
+            if (status == AttendanceStatus.ABSENT) {
+                count++
+                dateCursor = dateCursor.previousDay()
+            } else if (status == AttendanceStatus.WORKED) {
+                break
+            } else {
+                // BLANK / unrecorded: do not count as absence
+                if (i > 0) {
+                    break
+                }
+                dateCursor = dateCursor.previousDay()
+            }
+        }
+        return count
+    }
 }
 
 class AttendanceViewModel(
@@ -86,6 +140,8 @@ class AttendanceViewModel(
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
 
     init {
+        currentInstance = this
+
         // Collect active workers for attendance list
         viewModelScope.launch {
             repository.getActiveWorkers().collectLatest { workersList ->
@@ -199,6 +255,12 @@ class AttendanceViewModel(
         )
     }
 
+    /**
+     * Requirement 4: Real repository save finishes before navigation.
+     * Moves to the next worker in Pointage order (date remains fixed).
+     * If this is the last worker, displays clear French completion state.
+     * If save fails, remains on current worker with retry option.
+     */
     fun saveWorkedHours(hours: Int, minutes: Int) {
         val worker = _uiState.value.selectedWorkerForEdit ?: return
         val date = _uiState.value.targetDateForEdit ?: _uiState.value.currentDate
@@ -223,7 +285,8 @@ class AttendanceViewModel(
                         minutes = minutes
                     )
                 )
-                closeEditDialog()
+                // Real save finished! Advance to next worker in Pointage order
+                moveToNextWorkerOrComplete(worker, date)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     saveErrorMessage = "Impossible d’enregistrer. Réessayez."
@@ -234,6 +297,9 @@ class AttendanceViewModel(
         }
     }
 
+    /**
+     * Requirement 4: Set AB and advance to next worker.
+     */
     fun setAbsent() {
         val worker = _uiState.value.selectedWorkerForEdit ?: return
         val date = _uiState.value.targetDateForEdit ?: _uiState.value.currentDate
@@ -249,10 +315,101 @@ class AttendanceViewModel(
                         status = AttendanceStatus.ABSENT
                     )
                 )
-                closeEditDialog()
+                // Real save finished! Advance to next worker in Pointage order
+                moveToNextWorkerOrComplete(worker, date)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     saveErrorMessage = "Impossible d’enregistrer. Réessayez."
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            }
+        }
+    }
+
+    private fun moveToNextWorkerOrComplete(currentWorker: Worker, date: AtelierDate) {
+        val ordered = _uiState.value.pointageOrderedWorkers
+        val currentIndex = ordered.indexOfFirst { it.id == currentWorker.id }
+        if (currentIndex != -1 && currentIndex < ordered.size - 1) {
+            val nextWorker = ordered[currentIndex + 1]
+            _uiState.value = _uiState.value.copy(
+                selectedWorkerForEdit = nextWorker,
+                targetDateForEdit = date,
+                saveErrorMessage = null
+            )
+        } else {
+            // Last worker! Clear dialog, show clear French completion state and remain in Pointage
+            _uiState.value = _uiState.value.copy(
+                selectedWorkerForEdit = null,
+                targetDateForEdit = null,
+                saveErrorMessage = null,
+                pointageCompletionMessage = "Pointage terminé avec succès pour toutes les opératrices du jour."
+            )
+        }
+    }
+
+    fun navigateNextWorker(): Boolean {
+        val currentWorker = _uiState.value.selectedWorkerForEdit ?: return false
+        val date = _uiState.value.targetDateForEdit ?: _uiState.value.currentDate
+        val ordered = _uiState.value.pointageOrderedWorkers
+        val currentIndex = ordered.indexOfFirst { it.id == currentWorker.id }
+        if (currentIndex != -1 && currentIndex < ordered.size - 1) {
+            _uiState.value = _uiState.value.copy(
+                selectedWorkerForEdit = ordered[currentIndex + 1],
+                targetDateForEdit = date,
+                saveErrorMessage = null
+            )
+            return true
+        }
+        return false
+    }
+
+    fun navigatePreviousWorker(): Boolean {
+        val currentWorker = _uiState.value.selectedWorkerForEdit ?: return false
+        val date = _uiState.value.targetDateForEdit ?: _uiState.value.currentDate
+        val ordered = _uiState.value.pointageOrderedWorkers
+        val currentIndex = ordered.indexOfFirst { it.id == currentWorker.id }
+        if (currentIndex > 0) {
+            _uiState.value = _uiState.value.copy(
+                selectedWorkerForEdit = ordered[currentIndex - 1],
+                targetDateForEdit = date,
+                saveErrorMessage = null
+            )
+            return true
+        }
+        return false
+    }
+
+    fun dismissPointageCompletionMessage() {
+        _uiState.value = _uiState.value.copy(pointageCompletionMessage = null)
+    }
+
+    /**
+     * Requirement 5: Modifier navigates to exact worker in existing Équipe route.
+     */
+    fun navigateToWorkerProfileInTeam(worker: Worker) {
+        _uiState.value = _uiState.value.copy(
+            selectedWorkerForEdit = null,
+            targetDateForEdit = null,
+            selectedProfileWorker = worker,
+            currentSection = AtelierSection.EQUIPE
+        )
+        loadWorkerRateHistory(worker.id)
+    }
+
+    /**
+     * Requirement 5: Supprimer du pointage deletes only the attendance record for the selected context.
+     * Never deletes the worker profile, archive, payroll, rates, or other dates.
+     */
+    fun deleteAttendanceRecordFromPointage(worker: Worker, date: AtelierDate) {
+        if (date.isSunday) return // Automatic Sunday REST_DAY cannot be deleted
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true, saveErrorMessage = null)
+                repository.resetAttendanceEntry(worker.id, date.isoString)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    saveErrorMessage = "Impossible de supprimer le pointage. Réessayez."
                 )
             } finally {
                 _uiState.value = _uiState.value.copy(isLoading = false)
@@ -527,7 +684,9 @@ class AttendanceViewModel(
                     advances = workerAdvances,
                     adjustments = workerAdjustments,
                     payments = workerPayments,
-                    oldUnpaidBalanceMillimes = 0L
+                    oldUnpaidBalanceMillimes = 0L,
+                    worker = worker,
+                    referenceDate = _uiState.value.currentDate
                 )
                 map[worker.id] = breakdown
             }
@@ -631,6 +790,9 @@ class AttendanceViewModel(
     }
 
     companion object {
+        @Volatile
+        var currentInstance: AttendanceViewModel? = null
+
         fun provideFactory(repository: AttendanceRepository): androidx.lifecycle.ViewModelProvider.Factory =
             object : androidx.lifecycle.ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

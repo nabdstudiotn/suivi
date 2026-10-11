@@ -145,6 +145,52 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  fun `test Equipe search matches french accents case insensitively`() {
+    val query = "hel"
+    val normalizedQuery = com.example.domain.model.normalizeForFrenchSearch(query)
+    
+    val worker1 = Worker("w1", "Héléna", "Kacem", "HK", 6500L, "Piqueuse")
+    val worker2 = Worker("w2", "Fatma", "Chérif", "FC", 6500L, "Modéliste")
+
+    val matches1 = com.example.domain.model.normalizeForFrenchSearch(worker1.firstName).contains(normalizedQuery)
+    val matches2 = com.example.domain.model.normalizeForFrenchSearch(worker2.role).contains(normalizedQuery)
+
+    assertTrue(matches1)
+    assertFalse(matches2)
+
+    val roleQuery = com.example.domain.model.normalizeForFrenchSearch("modeliste")
+    val roleMatch = com.example.domain.model.normalizeForFrenchSearch(worker2.role).contains(roleQuery)
+    assertTrue(roleMatch)
+  }
+
+  @Test
+  fun `test Equipe worker draft preserves uncommitted changes`() {
+    val emptyDraft = com.example.domain.model.WorkerDraft()
+    assertFalse(emptyDraft.isNotEmpty)
+
+    val activeDraft = com.example.domain.model.WorkerDraft(
+      firstName = "Najet",
+      lastName = "Bouali",
+      role = "Piqueuse",
+      rateInput = "7.000"
+    )
+    assertTrue(activeDraft.isNotEmpty)
+  }
+
+  @Test
+  fun `test Equipe duplicate homonyms have independent unique IDs`() = runBlocking {
+    val repository = RoomAttendanceRepository(database)
+    val worker1 = repository.addWorker("Sonia", "Trabelsi", "Piqueuse", 6500L, "2026-01-01")
+    val worker2 = repository.addWorker("Sonia", "Trabelsi", "Finisseuse", 7000L, "2026-02-01")
+
+    assertEquals(worker1.fullName, worker2.fullName)
+    assertTrue(worker1.id != worker2.id)
+
+    val allWorkers = repository.getAllWorkers().first()
+    assertEquals(2, allWorkers.size)
+  }
+
+  @Test
   fun `test date boundaries and tomorrow locked logic`() {
     val today = AtelierDate(2026, 10, 8)
     val yesterday = today.previousDay()
@@ -277,6 +323,126 @@ class ExampleRobolectricTest {
     assertEquals(30000L, payroll.paidAmountMillimes)
     // remainingDue = totalDue (60000) - paid (30000) = 30000 millimes = 30.000 TND
     assertEquals(30000L, payroll.remainingDueMillimes)
+  }
+
+  @Test
+  fun `test Paie Stage 3 eligibility is blocked during open month unless month ended or worker real stop`() {
+    val entries = listOf(
+      AttendanceEntry("w1", "2026-10-01", AttendanceStatus.WORKED, hours = 8, minutes = 0)
+    )
+    val rateHistory = listOf(HourlyRateRecord(id = 1, workerId = "w1", effectiveDateIso = "2026-10-01", rateMillimes = 7000L))
+
+    val activeWorker = Worker("w1", "Nadia", "Kacem", "NK", 7000L, "Piqueuse", isActive = true)
+
+    // Reference date mid-month (2026-10-15) -> Month is OPEN, not eligible for final calculation
+    val midMonth = AtelierDate(2026, 10, 15)
+    val payrollOpen = AtelierCalculations.calculateWorkerMonthPayroll(
+      workerId = "w1",
+      yearMonth = "2026-10",
+      monthEntries = entries,
+      rateHistory = rateHistory,
+      fallbackRateMillimes = 7000L,
+      advances = emptyList(),
+      adjustments = emptyList(),
+      payments = emptyList(),
+      worker = activeWorker,
+      referenceDate = midMonth
+    )
+
+    assertFalse(payrollOpen.isEligibleForFinal)
+    assertEquals(com.example.domain.calculation.PayrollEligibilityStatus.EN_COURS_MOIS_OUVERT, payrollOpen.eligibilityStatus)
+
+    // Reference date at month end (2026-10-31) -> Month is FINISHED, calculation is eligible
+    val endMonth = AtelierDate(2026, 10, 31)
+    val payrollClosed = AtelierCalculations.calculateWorkerMonthPayroll(
+      workerId = "w1",
+      yearMonth = "2026-10",
+      monthEntries = entries,
+      rateHistory = rateHistory,
+      fallbackRateMillimes = 7000L,
+      advances = emptyList(),
+      adjustments = emptyList(),
+      payments = emptyList(),
+      worker = activeWorker,
+      referenceDate = endMonth
+    )
+
+    assertTrue(payrollClosed.isEligibleForFinal)
+    assertEquals(com.example.domain.calculation.PayrollEligibilityStatus.ELIGIBLE_FINAL, payrollClosed.eligibilityStatus)
+
+    // Mid-month with real worker stop (archived before month end e.g. 2026-10-10) -> Eligible
+    val stoppedWorker = Worker(
+      id = "w1",
+      firstName = "Nadia",
+      lastName = "Kacem",
+      initials = "NK",
+      currentRateMillimes = 7000L,
+      role = "Piqueuse",
+      isActive = false,
+      archivedDateIso = "2026-10-10"
+    )
+    val payrollStopped = AtelierCalculations.calculateWorkerMonthPayroll(
+      workerId = "w1",
+      yearMonth = "2026-10",
+      monthEntries = entries,
+      rateHistory = rateHistory,
+      fallbackRateMillimes = 7000L,
+      advances = emptyList(),
+      adjustments = emptyList(),
+      payments = emptyList(),
+      worker = stoppedWorker,
+      referenceDate = midMonth
+    )
+
+    assertTrue(payrollStopped.isEligibleForFinal)
+    assertEquals(com.example.domain.calculation.PayrollEligibilityStatus.ELIGIBLE_ARRET_ACTIVITE, payrollStopped.eligibilityStatus)
+
+    // AB alone without archived stop is NOT a worker stop -> Still ineligible during open month
+    val abEntries = listOf(
+      AttendanceEntry("w1", "2026-10-01", AttendanceStatus.WORKED, hours = 8, minutes = 0),
+      AttendanceEntry("w1", "2026-10-02", AttendanceStatus.ABSENT),
+      AttendanceEntry("w1", "2026-10-03", AttendanceStatus.ABSENT)
+    )
+    val payrollAbOnly = AtelierCalculations.calculateWorkerMonthPayroll(
+      workerId = "w1",
+      yearMonth = "2026-10",
+      monthEntries = abEntries,
+      rateHistory = rateHistory,
+      fallbackRateMillimes = 7000L,
+      advances = emptyList(),
+      adjustments = emptyList(),
+      payments = emptyList(),
+      worker = activeWorker, // Active worker with absences only
+      referenceDate = midMonth
+    )
+    assertFalse(payrollAbOnly.isEligibleForFinal)
+  }
+
+  @Test
+  fun `test Paie Stage 3 Grade 3 blocks approval and payment when incomplete`() {
+    val rateHistory = listOf(HourlyRateRecord(id = 1, workerId = "w1", effectiveDateIso = "2026-10-01", rateMillimes = 7000L))
+
+    // Month with unrecorded day (BLANK)
+    val incompleteEntries = listOf(
+      AttendanceEntry("w1", "2026-10-01", AttendanceStatus.WORKED, hours = 8, minutes = 0),
+      AttendanceEntry("w1", "2026-10-02", AttendanceStatus.BLANK)
+    )
+
+    val payrollIncomplete = AtelierCalculations.calculateWorkerMonthPayroll(
+      workerId = "w1",
+      yearMonth = "2026-10",
+      monthEntries = incompleteEntries,
+      rateHistory = rateHistory,
+      fallbackRateMillimes = 7000L,
+      advances = emptyList(),
+      adjustments = emptyList(),
+      payments = emptyList(),
+      referenceDate = AtelierDate(2026, 10, 31)
+    )
+
+    assertEquals(com.example.domain.calculation.PayrollAuditGrade.GRADE_3_BLOQUE, payrollIncomplete.auditGrade)
+    assertEquals(com.example.domain.calculation.PayrollEligibilityStatus.INCOMPLET, payrollIncomplete.eligibilityStatus)
+    assertTrue(payrollIncomplete.isGrade3Blocked)
   }
 
   @Test
@@ -419,5 +585,105 @@ class ExampleRobolectricTest {
     assertNotNull(mapAfterReset["w1"])
     assertEquals(AttendanceStatus.BLANK, mapAfterReset["w1"]!!.status)
     assertEquals("À renseigner", mapAfterReset["w1"]!!.durationFormatted)
+  }
+
+  @Test
+  fun `test Pointage v2 deterministic minutes 00 or 30 and integer duration`() {
+    val entry7h30 = AttendanceEntry("w1", "2026-10-08", AttendanceStatus.WORKED, hours = 7, minutes = 30)
+    val entry8h00 = AttendanceEntry("w1", "2026-10-08", AttendanceStatus.WORKED, hours = 8, minutes = 0)
+    val entry12h30 = AttendanceEntry("w1", "2026-10-08", AttendanceStatus.WORKED, hours = 12, minutes = 30)
+
+    // 7h 30 = 450 minutes
+    assertEquals(450, entry7h30.workedMinutes)
+    assertEquals(450, entry7h30.totalMinutes)
+    assertEquals("7 h 30", entry7h30.durationFormatted)
+
+    // 8h 00 = 480 minutes
+    assertEquals(480, entry8h00.workedMinutes)
+    assertEquals("8 h", entry8h00.durationFormatted)
+
+    // 12h 30 = 750 minutes
+    assertEquals(750, entry12h30.workedMinutes)
+    assertEquals("12 h 30", entry12h30.durationFormatted)
+  }
+
+  @Test
+  fun `test Pointage v2 ordering groups workers by consecutive AB threshold`() {
+    val wA = Worker("wA", "Amira", "Bouazizi", "AB", 6500L, "Piqueuse", isActive = true)
+    val wB = Worker("wB", "Bochra", "Trabelsi", "BT", 6500L, "Piqueuse", isActive = true)
+    val wC = Worker("wC", "Cyrine", "Gharbi", "CG", 6500L, "Piqueuse", isActive = true)
+
+    val date = AtelierDate(2026, 10, 8) // Thursday
+    // wA has 5 consecutive AB days (2026-10-04 is Sunday, skipped; days: 02, 03, 05, 06, 07, 08)
+    val entries = mutableMapOf<String, AttendanceEntry>()
+    val abDays = listOf("2026-10-02", "2026-10-03", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08")
+    for (d in abDays) {
+      entries["wA_$d"] = AttendanceEntry("wA", d, AttendanceStatus.ABSENT)
+    }
+
+    // wB has 2 AB days
+    entries["wB_2026-10-07"] = AttendanceEntry("wB", "2026-10-07", AttendanceStatus.ABSENT)
+    entries["wB_2026-10-08"] = AttendanceEntry("wB", "2026-10-08", AttendanceStatus.ABSENT)
+
+    // wC worked on 2026-10-08
+    entries["wC_2026-10-08"] = AttendanceEntry("wC", "2026-10-08", AttendanceStatus.WORKED, hours = 7, minutes = 30)
+
+    val state = com.example.ui.attendance.AttendanceUiState(
+      currentDate = date,
+      allWorkers = listOf(wA, wB, wC),
+      monthAttendanceEntries = entries
+    )
+
+    // Check consecutive AB calculation
+    assertTrue(state.consecutiveAbDaysFor("wA") >= 5)
+    assertEquals(2, state.consecutiveAbDaysFor("wB"))
+    assertEquals(0, state.consecutiveAbDaysFor("wC"))
+
+    // Pointage ordered list puts < 5 consecutive AB first (Bochra, Cyrine), then >= 5 at bottom (Amira)
+    val ordered = state.pointageOrderedWorkers
+    assertEquals(3, ordered.size)
+    assertEquals("Bochra Trabelsi", ordered[0].fullName)
+    assertEquals("Cyrine Gharbi", ordered[1].fullName)
+    assertEquals("Amira Bouazizi", ordered[2].fullName)
+  }
+
+  @Test
+  fun `test Pointage v2 single context deletion preserves worker profile and rate history`() = runBlocking {
+    val repository = RoomAttendanceRepository(database)
+    val worker = repository.addWorker(
+      firstName = "Mouna",
+      lastName = "Kefi",
+      role = "Coupeuse",
+      hourlyRateMillimes = 7500L,
+      hireDateIso = "2026-01-01"
+    )
+
+    // Save attendance for 2 dates
+    repository.saveAttendanceEntry(
+      AttendanceEntry(workerId = worker.id, dateIso = "2026-10-05", status = AttendanceStatus.WORKED, hours = 8, minutes = 0)
+    )
+    repository.saveAttendanceEntry(
+      AttendanceEntry(workerId = worker.id, dateIso = "2026-10-06", status = AttendanceStatus.WORKED, hours = 7, minutes = 30)
+    )
+
+    // Delete attendance only for 2026-10-06
+    repository.resetAttendanceEntry(worker.id, "2026-10-06")
+
+    // Verify 2026-10-06 is reset to BLANK
+    val map06 = repository.getAttendanceForDate("2026-10-06").first()
+    assertEquals(AttendanceStatus.BLANK, map06[worker.id]?.status)
+
+    // Verify 2026-10-05 is intact
+    val map05 = repository.getAttendanceForDate("2026-10-05").first()
+    assertEquals(AttendanceStatus.WORKED, map05[worker.id]?.status)
+    assertEquals(480, map05[worker.id]?.workedMinutes)
+
+    // Verify worker profile and rate history are intact
+    val profile = repository.getWorkerById(worker.id).first()
+    assertNotNull(profile)
+    assertEquals("Mouna Kefi", profile!!.fullName)
+    val rates = repository.getRatesForWorker(worker.id).first()
+    assertEquals(1, rates.size)
+    assertEquals(7500L, rates[0].rateMillimes)
   }
 }

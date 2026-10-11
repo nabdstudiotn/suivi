@@ -7,10 +7,21 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,12 +30,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.AtelierSection
 import com.example.ui.theme.NabdBorder
-import com.example.ui.theme.NabdMineralGray
 import com.example.ui.theme.NabdObsidian
 import com.example.ui.theme.NabdPurple
 import com.example.ui.theme.NabdSurfaceSubtle
@@ -32,7 +45,11 @@ import com.example.ui.theme.NabdSurfaceWhite
 
 /**
  * Horizontal section navigation bar per project screen map:
- * Pointage -> Archives -> Équipe -> Paie -> Annonces -> Discussions -> Paramètres.
+ * Pointage -> Équipe -> Paie -> Communication -> Archives -> Paramètres.
+ * Adheres to Requirement 7:
+ * - Deterministic Material vector icons.
+ * - French content descriptions.
+ * - Distinct selected state via icon, text semantics, restrained purple, background, and border.
  */
 @Composable
 fun SectionNavigationBar(
@@ -66,27 +83,52 @@ fun SectionNavigationBar(
                 val isSelected = section == currentSection
                 val tag = "nav_tab_${section.name.lowercase()}"
 
+                val (icon, frenchDesc) = when (section) {
+                    AtelierSection.POINTAGE -> Icons.Default.EventAvailable to "Section Pointage"
+                    AtelierSection.EQUIPE -> Icons.Default.Group to "Section Équipe"
+                    AtelierSection.PAIE -> Icons.Default.Payments to "Section Paie et règlements"
+                    AtelierSection.COMMUNICATION -> Icons.Default.Chat to "Section Communication"
+                    AtelierSection.ARCHIVES -> Icons.Default.Inventory2 to "Section Archives"
+                    AtelierSection.PARAMETRES -> Icons.Default.Settings to "Section Paramètres"
+                }
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (isSelected) NabdPurple else NabdSurfaceSubtle)
                         .border(
-                            width = 1.dp,
+                            width = if (isSelected) 1.5.dp else 1.dp,
                             color = if (isSelected) NabdPurple else NabdBorder,
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { onSectionSelected(section) }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .semantics {
+                            selected = isSelected
+                            contentDescription = "${section.titleFrench}, ${if (isSelected) "sélectionné" else "non sélectionné"}"
+                        }
                         .testTag(tag),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = section.titleFrench,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (isSelected) Color.White else NabdObsidian,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = frenchDesc,
+                            tint = if (isSelected) Color.White else NabdObsidian,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = section.titleFrench,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (isSelected) Color.White else NabdObsidian,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
         }

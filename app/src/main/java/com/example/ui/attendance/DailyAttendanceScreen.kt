@@ -1,8 +1,10 @@
 package com.example.ui.attendance
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,12 +28,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -44,6 +48,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,7 +110,15 @@ fun DailyAttendanceScreen(
     onNavigateToTeam: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activeWorkers = state.activeWorkersForDate
+    val activeWorkers = if (state.viewMode == AttendanceViewMode.JOUR) {
+        state.pointageOrderedWorkers
+    } else {
+        state.activeWorkersForDate
+    }
+
+    var selectedWorkerForContextMenu by remember { mutableStateOf<Worker?>(null) }
+    var workerToDeleteFromPointage by remember { mutableStateOf<Worker?>(null) }
+    var showUnavailableNoteForWorker by remember { mutableStateOf<Worker?>(null) }
 
     Column(
         modifier = modifier
@@ -126,6 +142,57 @@ fun DailyAttendanceScreen(
                 message = state.saveErrorMessage,
                 onDismiss = onClearError
             )
+        }
+
+        // Completion Banner if Pointage is completed for the day
+        if (state.pointageCompletionMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(NabdMintBackground)
+                    .border(1.dp, NabdMintBorder, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("pointage_completion_banner")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = NabdMintText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = state.pointageCompletionMessage,
+                            color = NabdMintText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    val vm = AttendanceViewModel.currentInstance
+                    IconButton(
+                        onClick = { vm?.dismissPointageCompletionMessage() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Fermer le message",
+                            tint = NabdMintText,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -196,8 +263,8 @@ fun DailyAttendanceScreen(
         } else {
             when (state.viewMode) {
                 AttendanceViewMode.JOUR -> {
-                    // 1. Day View (Jour)
-                    // Strictly NO total-hours footer!
+                    // 1. Day View (Jour) per Requirement 6: Pointage ordering
+                    // Workers < 5 consecutive AB first, workers >= 5 consecutive AB at bottom
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -206,12 +273,15 @@ fun DailyAttendanceScreen(
                     ) {
                         items(activeWorkers, key = { it.id }) { worker ->
                             val entry = state.attendanceEntries[worker.id]
+                            val abDays = state.consecutiveAbDaysFor(worker.id)
                             WorkerAttendanceCard(
                                 worker = worker,
                                 entry = entry,
+                                consecutiveAbDays = abDays,
                                 isLocked = state.isTomorrowLocked,
                                 isSunday = state.currentDate.isSunday,
-                                onClick = { onWorkerClicked(worker) }
+                                onClick = { onWorkerClicked(worker) },
+                                onLongClick = { selectedWorkerForContextMenu = worker }
                             )
                         }
 
@@ -240,6 +310,274 @@ fun DailyAttendanceScreen(
                 }
             }
         }
+    }
+
+    // Requirement 5: Long-press compact context menu containing only:
+    // Modifier, Ajouter une note, Supprimer du pointage
+    selectedWorkerForContextMenu?.let { worker ->
+        val isSunday = state.currentDate.isSunday
+        AlertDialog(
+            onDismissRequest = { selectedWorkerForContextMenu = null },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(NabdPurple.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = worker.initials,
+                            fontWeight = FontWeight.Bold,
+                            color = NabdPurple,
+                            fontSize = 14.sp
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = worker.fullName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = NabdObsidian
+                        )
+                        Text(
+                            text = worker.role,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NabdMineralGray
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Item 1: Modifier (opens worker in existing Équipe route)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, NabdBorder, RoundedCornerShape(10.dp))
+                            .clickable {
+                                selectedWorkerForContextMenu = null
+                                val vm = AttendanceViewModel.currentInstance
+                                if (vm != null) {
+                                    vm.navigateToWorkerProfileInTeam(worker)
+                                } else {
+                                    onNavigateToTeam()
+                                }
+                            }
+                            .testTag("context_action_modifier"),
+                        color = NabdSurfaceSubtle
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Modifier",
+                                tint = NabdPurple,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Modifier",
+                                fontWeight = FontWeight.SemiBold,
+                                color = NabdObsidian,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    // Item 2: Ajouter une note (honest unavailable state)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, NabdBorder, RoundedCornerShape(10.dp))
+                            .clickable {
+                                selectedWorkerForContextMenu = null
+                                showUnavailableNoteForWorker = worker
+                            }
+                            .testTag("context_action_note"),
+                        color = NabdSurfaceSubtle
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NoteAdd,
+                                contentDescription = "Ajouter une note",
+                                tint = NabdPurple,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Ajouter une note",
+                                fontWeight = FontWeight.SemiBold,
+                                color = NabdObsidian,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    // Item 3: Supprimer du pointage (deletes only the attendance record for the selected context)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(
+                                1.dp,
+                                if (isSunday) NabdBorder else NabdCoralBorder,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable(enabled = !isSunday) {
+                                selectedWorkerForContextMenu = null
+                                workerToDeleteFromPointage = worker
+                            }
+                            .testTag("context_action_delete_pointage"),
+                        color = if (isSunday) NabdSurfaceSubtle.copy(alpha = 0.5f) else NabdCoralBackground
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "Supprimer du pointage",
+                                tint = if (isSunday) NabdMineralGray else NabdCoralText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Supprimer du pointage",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isSunday) NabdMineralGray else NabdCoralText,
+                                    fontSize = 14.sp
+                                )
+                                if (isSunday) {
+                                    Text(
+                                        text = "Non disponible le dimanche (repos automatique)",
+                                        fontSize = 11.sp,
+                                        color = NabdMineralGray
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { selectedWorkerForContextMenu = null },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Fermer")
+                }
+            },
+            containerColor = NabdSurfaceWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Confirmation dialog for "Supprimer du pointage" per Requirement 5
+    // Explicitly states that worker profile and history will not be deleted
+    workerToDeleteFromPointage?.let { worker ->
+        AlertDialog(
+            onDismissRequest = { workerToDeleteFromPointage = null },
+            title = {
+                Text(
+                    text = "Supprimer du pointage ?",
+                    fontWeight = FontWeight.Bold,
+                    color = NabdObsidian,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Confirmez-vous la suppression du pointage de ${worker.fullName} pour le ${state.currentDate.formattedFrench} ?\n\nCette action réinitialise uniquement la saisie de ce jour en « À renseigner ». Le profil de l'opératrice, ses archives, sa paie, ses taux horaires et son historique sur les autres dates ne seront pas supprimés.",
+                    color = NabdObsidian,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val w = worker
+                        workerToDeleteFromPointage = null
+                        val vm = AttendanceViewModel.currentInstance
+                        if (vm != null) {
+                            vm.deleteAttendanceRecordFromPointage(w, state.currentDate)
+                        } else {
+                            onConfirmEffacer()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NabdCoralText,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("confirm_delete_pointage_button")
+                ) {
+                    Text("Supprimer du pointage")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { workerToDeleteFromPointage = null },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Annuler")
+                }
+            },
+            containerColor = NabdSurfaceWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Honest unavailable note notice dialog
+    showUnavailableNoteForWorker?.let {
+        AlertDialog(
+            onDismissRequest = { showUnavailableNoteForWorker = null },
+            title = {
+                Text(
+                    text = "Ajouter une note",
+                    fontWeight = FontWeight.Bold,
+                    color = NabdObsidian
+                )
+            },
+            text = {
+                Text(
+                    text = "L'ajout de note pour cette journée d'atelier n'est pas encore disponible dans cette version de Pointage.",
+                    color = NabdObsidian,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showUnavailableNoteForWorker = null },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NabdPurple,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Compris")
+                }
+            },
+            containerColor = NabdSurfaceWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 
     // Confirmation dialog for Effacer
@@ -287,14 +625,18 @@ fun DailyAttendanceScreen(
 
 /**
  * Visual card for each active worker in the daily attendance list.
+ * Supports tap to open edit dialog and long-press to open context menu.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WorkerAttendanceCard(
     worker: Worker,
     entry: AttendanceEntry?,
+    consecutiveAbDays: Int = 0,
     isLocked: Boolean,
     isSunday: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
 ) {
     val status = if (isSunday) {
         AttendanceStatus.REST_DAY
@@ -307,7 +649,11 @@ private fun WorkerAttendanceCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .border(1.dp, NabdBorder, RoundedCornerShape(14.dp))
-            .clickable(enabled = !isLocked && !isSunday, onClick = onClick)
+            .combinedClickable(
+                enabled = !isLocked,
+                onClick = { if (!isSunday) onClick() },
+                onLongClick = onLongClick
+            )
             .testTag("worker_card_${worker.id}"),
         color = NabdSurfaceWhite,
         tonalElevation = 1.dp
@@ -347,11 +693,25 @@ private fun WorkerAttendanceCard(
                         fontWeight = FontWeight.SemiBold,
                         color = NabdObsidian
                     )
-                    Text(
-                        text = worker.role,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NabdMineralGray
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = worker.role,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NabdMineralGray
+                        )
+                        if (consecutiveAbDays >= 5) {
+                            Text(
+                                text = "• Absence prolongée ($consecutiveAbDays j)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = NabdCoralText,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
             }
 

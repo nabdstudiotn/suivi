@@ -12,6 +12,20 @@ import com.example.domain.model.formatMillimesAsTnd
 import java.math.BigDecimal
 import java.math.RoundingMode
 
+enum class PayrollAuditGrade(val labelFrench: String) {
+    GRADE_1_APPROUVE("Grade 1 — Conforme"),
+    GRADE_2_AVERTISSEMENT("Grade 2 — Vérification recommandée"),
+    GRADE_3_BLOQUE("Grade 3 — À revoir")
+}
+
+enum class PayrollEligibilityStatus(val labelFrench: String) {
+    ELIGIBLE_FINAL("Calcul final approuvable"),
+    ELIGIBLE_ARRET_ACTIVITE("Arrêt d'activité — Calcul final"),
+    EN_COURS_MOIS_OUVERT("Calcul en cours"),
+    INCOMPLET("Incomplet"),
+    A_VERIFIER("À vérifier")
+}
+
 /**
  * Deterministic payroll calculation result for a single worker in a month.
  * All financial amounts use exact integer minor units (millimes: 1 TND = 1000 millimes)
@@ -33,8 +47,15 @@ data class WorkerPayrollBreakdown(
     val oldUnpaidBalanceMillimes: Long,
     val totalDueMillimes: Long, // Base + Primes + PrimeAid - Retenues - Advances + OldBalance
     val paidAmountMillimes: Long,
-    val remainingDueMillimes: Long // TotalDue - PaidAmount
+    val remainingDueMillimes: Long, // TotalDue - PaidAmount
+    val auditGrade: PayrollAuditGrade = PayrollAuditGrade.GRADE_1_APPROUVE,
+    val eligibilityStatus: PayrollEligibilityStatus = PayrollEligibilityStatus.ELIGIBLE_FINAL,
+    val isEligibleForFinal: Boolean = true,
+    val statusLabel: String = "Calcul en cours"
 ) {
+    val isGrade3Blocked: Boolean
+        get() = auditGrade == PayrollAuditGrade.GRADE_3_BLOQUE || blankDaysCount > 0
+
     val totalHoursFormatted: String
         get() {
             val h = totalMinutes / 60
@@ -177,7 +198,9 @@ object AtelierCalculations {
         advances: List<AdvanceRecord>,
         adjustments: List<PayrollAdjustment>,
         payments: List<PaymentRecord>,
-        oldUnpaidBalanceMillimes: Long = 0L
+        oldUnpaidBalanceMillimes: Long = 0L,
+        worker: com.example.domain.model.Worker? = null,
+        referenceDate: com.example.domain.model.AtelierDate = com.example.domain.model.AtelierDate.todayTunis()
     ): WorkerPayrollBreakdown {
         val totalMinutes = calculateTotalMinutes(monthEntries)
         val basePay = calculateGrossPayMillimes(monthEntries, rateHistory, fallbackRateMillimes)
@@ -215,6 +238,45 @@ object AtelierCalculations {
         val restDays = monthEntries.count { it.status == AttendanceStatus.REST_DAY }
         val blankDays = monthEntries.count { it.status == AttendanceStatus.BLANK }
 
+        // Eligibility determination:
+        // Rule: Calculation becomes eligible ONLY when month has ended OR worker has a real persisted employment stop before month end.
+        val daysInMonth = com.example.domain.model.AtelierDate.daysInYearMonth(yearMonth)
+        val isMonthPast = referenceDate.yearMonthIso > yearMonth ||
+                (referenceDate.yearMonthIso == yearMonth && referenceDate.day >= daysInMonth)
+
+        val hasRealWorkerStop = worker != null && (!worker.isActive || worker.archivedDateIso != null) &&
+                run {
+                    val stopDate = worker.archivedDateIso
+                    stopDate != null && stopDate.startsWith(yearMonth) && (worker.returnDateIso == null || worker.returnDateIso > stopDate)
+                }
+
+        val isEligible = isMonthPast || hasRealWorkerStop
+
+        // Audit Grade determination:
+        // Grade 3 (Blocked): UNRECORDED days remaining in employment period, or negative total due, or missing valid rates
+        val hasMissingRate = rateHistory.isEmpty() && fallbackRateMillimes <= 0L
+        val auditGrade = when {
+            blankDays > 0 || hasMissingRate -> PayrollAuditGrade.GRADE_3_BLOQUE
+            absentDays > 10 || (advancesTotal > basePay && basePay > 0) -> PayrollAuditGrade.GRADE_2_AVERTISSEMENT
+            else -> PayrollAuditGrade.GRADE_1_APPROUVE
+        }
+
+        val eligibilityStatus = when {
+            blankDays > 0 -> PayrollEligibilityStatus.INCOMPLET
+            auditGrade == PayrollAuditGrade.GRADE_3_BLOQUE -> PayrollEligibilityStatus.A_VERIFIER
+            hasRealWorkerStop -> PayrollEligibilityStatus.ELIGIBLE_ARRET_ACTIVITE
+            isMonthPast -> PayrollEligibilityStatus.ELIGIBLE_FINAL
+            else -> PayrollEligibilityStatus.EN_COURS_MOIS_OUVERT
+        }
+
+        val statusLabel = when (eligibilityStatus) {
+            PayrollEligibilityStatus.INCOMPLET -> "Incomplet"
+            PayrollEligibilityStatus.A_VERIFIER -> "À vérifier"
+            PayrollEligibilityStatus.ELIGIBLE_ARRET_ACTIVITE -> "Arrêt d'activité — Calcul final"
+            PayrollEligibilityStatus.ELIGIBLE_FINAL -> "Calcul final approuvable"
+            PayrollEligibilityStatus.EN_COURS_MOIS_OUVERT -> "Calcul en cours"
+        }
+
         return WorkerPayrollBreakdown(
             workerId = workerId,
             yearMonth = yearMonth,
@@ -231,7 +293,11 @@ object AtelierCalculations {
             oldUnpaidBalanceMillimes = oldUnpaidBalanceMillimes,
             totalDueMillimes = totalDue,
             paidAmountMillimes = paidTotal,
-            remainingDueMillimes = remainingDue
+            remainingDueMillimes = remainingDue,
+            auditGrade = auditGrade,
+            eligibilityStatus = eligibilityStatus,
+            isEligibleForFinal = isEligible,
+            statusLabel = statusLabel
         )
     }
 
