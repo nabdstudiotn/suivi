@@ -127,6 +127,124 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
       },
       "required": ["id", "userId", "title", "content", "authorName", "isUrgent", "createdAt"]
+    },
+    "Company": {
+      "title": "Company",
+      "description": "Workshop company record for workspace isolation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "name", "ownerId", "createdAt"]
+    },
+    "CompanyMember": {
+      "title": "CompanyMember",
+      "description": "Verified membership and permissions within a workshop company",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "companyId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["DIRECTRICE", "CHAFE", "OUVRIERE", "admin", "supervisor", "worker"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "canPostGroup": { "type": "boolean" },
+        "canDirectMessage": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "companyId", "displayName", "role", "status", "canPostGroup", "canDirectMessage", "createdAt"]
+    },
+    "ChatConversation": {
+      "title": "ChatConversation",
+      "description": "Workshop group or direct chat conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyId": { "type": "string" },
+        "type": { "type": "string", "enum": ["GROUP", "DIRECT"] },
+        "title": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "companyId", "type", "title", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real idempotent text message within a workshop conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "companyId": { "type": "string" },
+        "type": { "type": "string", "enum": ["GROUP", "DIRECT"] },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "text": { "type": "string" },
+        "clientTimestamp": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "conversationId", "companyId", "type", "senderId", "senderName", "senderRole", "text", "clientTimestamp", "createdAt"]
+    },
+    "WorkshopAnnouncement": {
+      "title": "WorkshopAnnouncement",
+      "description": "Workshop management announcement with duration, audience and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "type": { "type": "string", "enum": ["INFORMATION", "NOTIFICATION", "SECURITE", "ORGANISATION"] },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "priority": { "type": "string", "enum": ["NORMALE", "IMPORTANTE", "URGENTE"] },
+        "targetAudience": { "type": "string", "enum": ["TOUS", "CHAFAS_ONLY", "OUVRIERES_ONLY"] },
+        "startEpochMs": { "type": "integer" },
+        "endEpochMs": { "type": "integer" },
+        "durationDays": { "type": "integer" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRED", "CANCELLED"] },
+        "version": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["id", "companyId", "authorId", "authorName", "authorRole", "type", "title", "content", "priority", "targetAudience", "startEpochMs", "endEpochMs", "durationDays", "status", "version", "createdAt", "updatedAt"]
+    },
+    "AnnouncementReceipt": {
+      "title": "AnnouncementReceipt",
+      "description": "Individual recipient read receipt for an announcement version",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "announcementId": { "type": "string" },
+        "recipientUserId": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "recipientRole": { "type": "string" },
+        "firstReadAtEpochMs": { "type": "integer" },
+        "lastReadAtEpochMs": { "type": "integer" },
+        "announcementVersion": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["companyId", "announcementId", "recipientUserId", "recipientName", "recipientRole", "firstReadAtEpochMs", "lastReadAtEpochMs", "announcementVersion", "createdAt", "updatedAt"]
+    },
+    "AnnouncementAuditEntry": {
+      "title": "AnnouncementAuditEntry",
+      "description": "Audit entry for announcement lifecycle events",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "announcementId": { "type": "string" },
+        "action": { "type": "string", "enum": ["CREATED", "UPDATED", "CANCELLED"] },
+        "actorId": { "type": "string" },
+        "actorName": { "type": "string" },
+        "timestampEpochMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "FieldValue.serverTimestamp()" }
+      },
+      "required": ["companyId", "announcementId", "action", "actorId", "actorName", "timestampEpochMs", "createdAt"]
     }
   },
   "firestore": {
@@ -161,6 +279,34 @@
     "/users/{userId}/announcements/{announcementId}": {
       "schema": "Announcement",
       "description": "Workshop internal announcements and notices"
+    },
+    "/companies/{companyId}": {
+      "schema": "Company",
+      "description": "Workshop company container"
+    },
+    "/companies/{companyId}/members/{userId}": {
+      "schema": "CompanyMember",
+      "description": "Membership and permissions for users inside company"
+    },
+    "/companies/{companyId}/conversations/{conversationId}": {
+      "schema": "ChatConversation",
+      "description": "Group or private conversation thread"
+    },
+    "/companies/{companyId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Text message within conversation thread"
+    },
+    "/companies/{companyId}/announcements/{announcementId}": {
+      "schema": "WorkshopAnnouncement",
+      "description": "Workshop announcement with target audience and active duration"
+    },
+    "/companies/{companyId}/announcements/{announcementId}/receipts/{userId}": {
+      "schema": "AnnouncementReceipt",
+      "description": "Per-user read receipt for announcement"
+    },
+    "/companies/{companyId}/audit_logs/{auditId}": {
+      "schema": "AnnouncementAuditEntry",
+      "description": "Audit trails for announcement modifications"
     }
   }
 }

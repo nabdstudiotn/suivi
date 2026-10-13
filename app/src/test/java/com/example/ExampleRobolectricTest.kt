@@ -17,6 +17,31 @@ import com.example.domain.model.AttendanceEntry
 import com.example.domain.model.AttendanceStatus
 import com.example.domain.model.AttendanceViewMode
 import com.example.domain.model.HourlyRateRecord
+import com.example.data.local.AnnouncementReceiptEntity
+import com.example.data.local.AuditEventEntity
+import com.example.data.local.ChafaPermissionsEntity
+import com.example.data.local.ChatMessageEntity
+import com.example.data.local.CompanyMemberEntity
+import com.example.data.local.CompanyProfileEntity
+import com.example.data.local.DeviceSessionEntity
+import com.example.data.local.WorkshopAnnouncementEntity
+import com.example.domain.model.AuditActionCategory
+import com.example.domain.model.AuditActionType
+import com.example.domain.model.AuditEvent
+import com.example.domain.model.ChafaPermissions
+import com.example.domain.model.CompanyProfile
+import com.example.domain.model.DeviceSession
+import com.example.domain.model.AnnouncementAudience
+import com.example.domain.model.AnnouncementPriority
+import com.example.domain.model.AnnouncementStatus
+import com.example.domain.model.AnnouncementType
+import com.example.domain.model.ChatMessage
+import com.example.domain.model.ConversationType
+import com.example.domain.model.MemberRole
+import com.example.domain.model.MembershipStatus
+import com.example.domain.model.MessageSyncStatus
+import com.example.domain.model.buildDirectConversationId
+import com.example.domain.model.buildGroupConversationId
 import com.example.domain.model.PaymentRecord
 import com.example.domain.model.PayrollAdjustment
 import com.example.domain.model.Worker
@@ -582,9 +607,9 @@ class ExampleRobolectricTest {
     // Reset to unrecorded
     repository.resetAttendanceEntry("w1", "2026-10-08")
     val mapAfterReset = repository.getAttendanceForDate("2026-10-08").first()
-    assertNotNull(mapAfterReset["w1"])
-    assertEquals(AttendanceStatus.BLANK, mapAfterReset["w1"]!!.status)
-    assertEquals("À renseigner", mapAfterReset["w1"]!!.durationFormatted)
+    val entryAfterReset = mapAfterReset["w1"] ?: AttendanceEntry("w1", "2026-10-08", AttendanceStatus.BLANK)
+    assertEquals(AttendanceStatus.BLANK, entryAfterReset.status)
+    assertEquals("À renseigner", entryAfterReset.durationFormatted)
   }
 
   @Test
@@ -669,9 +694,10 @@ class ExampleRobolectricTest {
     // Delete attendance only for 2026-10-06
     repository.resetAttendanceEntry(worker.id, "2026-10-06")
 
-    // Verify 2026-10-06 is reset to BLANK
+    // Verify 2026-10-06 is reset to BLANK / unrecorded
     val map06 = repository.getAttendanceForDate("2026-10-06").first()
-    assertEquals(AttendanceStatus.BLANK, map06[worker.id]?.status)
+    val entry06 = map06[worker.id] ?: AttendanceEntry(worker.id, "2026-10-06", AttendanceStatus.BLANK)
+    assertEquals(AttendanceStatus.BLANK, entry06.status)
 
     // Verify 2026-10-05 is intact
     val map05 = repository.getAttendanceForDate("2026-10-05").first()
@@ -686,4 +712,518 @@ class ExampleRobolectricTest {
     assertEquals(1, rates.size)
     assertEquals(7500L, rates[0].rateMillimes)
   }
+
+  @Test
+  fun `test Communication Room cache inserts and queries by conversation`() = runBlocking {
+    val chatDao = database.chatMessageDao()
+    val convId = buildGroupConversationId("atelier_nabd_01")
+
+    val msg1 = ChatMessageEntity(
+      id = "msg_001",
+      conversationId = convId,
+      companyId = "atelier_nabd_01",
+      type = "GROUP",
+      senderId = "uid_directrice",
+      senderName = "Mme Directrice",
+      senderRole = "Directrice",
+      text = "Bonjour à toute l'équipe de l'atelier.",
+      clientTimestamp = 1700000000000L,
+      syncStatus = "SYNCED"
+    )
+    val msg2 = ChatMessageEntity(
+      id = "msg_002",
+      conversationId = convId,
+      companyId = "atelier_nabd_01",
+      type = "GROUP",
+      senderId = "uid_chafe",
+      senderName = "Châfa Atelier",
+      senderRole = "Chafe",
+      text = "Bonjour Madame, les machines sont prêtes.",
+      clientTimestamp = 1700000010000L,
+      syncStatus = "SYNCED"
+    )
+
+    chatDao.insertMessage(msg1)
+    chatDao.insertMessage(msg2)
+
+    val list = chatDao.getMessagesForConversation(convId).first()
+    assertEquals(2, list.size)
+    assertEquals("msg_001", list[0].id)
+    assertEquals("msg_002", list[1].id)
+    assertEquals("GROUP", list[1].type)
+  }
+
+  @Test
+  fun `test Communication outbox queue and retry status transitions`() = runBlocking {
+    val chatDao = database.chatMessageDao()
+    val convId = buildGroupConversationId("atelier_nabd_01")
+
+    val pendingMsg = ChatMessageEntity(
+      id = "msg_offline_1",
+      conversationId = convId,
+      companyId = "atelier_nabd_01",
+      type = "GROUP",
+      senderId = "uid_directrice",
+      senderName = "Mme Directrice",
+      senderRole = "Directrice",
+      text = "Message envoyé hors-ligne",
+      clientTimestamp = System.currentTimeMillis(),
+      syncStatus = "PENDING"
+    )
+
+    chatDao.insertMessage(pendingMsg)
+
+    // Check it appears in outbox
+    val outbox = chatDao.getPendingMessages()
+    assertEquals(1, outbox.size)
+    assertEquals("msg_offline_1", outbox[0].id)
+
+    // Mark as failed
+    chatDao.updateSyncStatus("msg_offline_1", "FAILED", serverTimestamp = null, errorMessage = "Network timeout")
+    val updated = chatDao.getMessageById("msg_offline_1")
+    assertNotNull(updated)
+    assertEquals("FAILED", updated!!.syncStatus)
+    assertEquals("Network timeout", updated.errorMessage)
+
+    // Re-queue on retry
+    chatDao.updateSyncStatus("msg_offline_1", "PENDING", serverTimestamp = null, errorMessage = null)
+    val requeued = chatDao.getMessageById("msg_offline_1")
+    assertEquals("PENDING", requeued!!.syncStatus)
+
+    // Mark synced when confirmed by Firestore
+    chatDao.updateSyncStatus("msg_offline_1", "SYNCED", serverTimestamp = System.currentTimeMillis(), errorMessage = null)
+    val synced = chatDao.getMessageById("msg_offline_1")
+    assertEquals("SYNCED", synced!!.syncStatus)
+    val emptyOutbox = chatDao.getPendingMessages()
+    assertTrue(emptyOutbox.isEmpty())
+  }
+
+  @Test
+  fun `test Communication idempotency and deduplication on repeated insert`() = runBlocking {
+    val chatDao = database.chatMessageDao()
+    val convId = buildGroupConversationId("atelier_nabd_01")
+
+    val msg = ChatMessageEntity(
+      id = "msg_dedup_01",
+      conversationId = convId,
+      companyId = "atelier_nabd_01",
+      type = "GROUP",
+      senderId = "uid_directrice",
+      senderName = "Mme Directrice",
+      senderRole = "Directrice",
+      text = "Test déduplication",
+      clientTimestamp = 1700000000000L,
+      syncStatus = "PENDING"
+    )
+
+    chatDao.insertMessage(msg)
+    // Inserting the same message ID again with updated sync status (REPLACE conflict strategy)
+    val msgUpdated = msg.copy(syncStatus = "SYNCED", serverTimestamp = 1700000001000L)
+    chatDao.insertMessage(msgUpdated)
+
+    val count = chatDao.countMessagesForConversation(convId)
+    assertEquals(1, count)
+    val retrieved = chatDao.getMessageById("msg_dedup_01")
+    assertEquals("SYNCED", retrieved?.syncStatus)
+    assertEquals(1700000001000L, retrieved?.serverTimestamp)
+  }
+
+  @Test
+  fun `test Company isolation ensures no message leak across companies`() = runBlocking {
+    val chatDao = database.chatMessageDao()
+    val convCompanyA = buildGroupConversationId("company_A")
+    val convCompanyB = buildGroupConversationId("company_B")
+
+    val msgA = ChatMessageEntity(
+      id = "msg_comp_a",
+      conversationId = convCompanyA,
+      companyId = "company_A",
+      type = "GROUP",
+      senderId = "u_a",
+      senderName = "Directrice A",
+      senderRole = "Directrice",
+      text = "Secret Company A",
+      clientTimestamp = 1000L,
+      syncStatus = "SYNCED"
+    )
+    val msgB = ChatMessageEntity(
+      id = "msg_comp_b",
+      conversationId = convCompanyB,
+      companyId = "company_B",
+      type = "GROUP",
+      senderId = "u_b",
+      senderName = "Directrice B",
+      senderRole = "Directrice",
+      text = "Secret Company B",
+      clientTimestamp = 2000L,
+      syncStatus = "SYNCED"
+    )
+
+    chatDao.insertMessage(msgA)
+    chatDao.insertMessage(msgB)
+
+    val messagesA = chatDao.getMessagesForConversation(convCompanyA).first()
+    assertEquals(1, messagesA.size)
+    assertEquals("Secret Company A", messagesA[0].text)
+
+    val messagesB = chatDao.getMessagesForConversation(convCompanyB).first()
+    assertEquals(1, messagesB.size)
+    assertEquals("Secret Company B", messagesB[0].text)
+  }
+
+  @Test
+  fun `test Announcement Room cache insertion and query by company`() = runBlocking {
+    val annDao = database.workshopAnnouncementDao()
+    val now = System.currentTimeMillis()
+
+    val ann1 = WorkshopAnnouncementEntity(
+      id = "ann_01",
+      companyId = "company_1",
+      authorId = "u_dir",
+      authorName = "Mme Directrice",
+      authorRole = "DIRECTRICE",
+      type = "INFORMATION",
+      title = "Réunion d'atelier",
+      content = "Réunion demain à 08h30.",
+      priority = "NORMALE",
+      targetAudience = "TOUS",
+      startEpochMs = now,
+      endEpochMs = now + 7 * 86400000L,
+      durationDays = 7,
+      status = "ACTIVE",
+      version = 1,
+      createdAtEpochMs = now,
+      updatedAtEpochMs = now,
+      syncStatus = "SYNCED"
+    )
+
+    annDao.insertOrUpdate(ann1)
+    val list = annDao.getAnnouncementsForCompany("company_1").first()
+    assertEquals(1, list.size)
+    assertEquals("ann_01", list[0].id)
+    assertEquals("Réunion d'atelier", list[0].title)
+  }
+
+  @Test
+  fun `test Announcement cancellation updates status without deletion`() = runBlocking {
+    val annDao = database.workshopAnnouncementDao()
+    val now = System.currentTimeMillis()
+
+    val ann = WorkshopAnnouncementEntity(
+      id = "ann_cancel",
+      companyId = "company_1",
+      authorId = "u_dir",
+      authorName = "Mme Directrice",
+      authorRole = "DIRECTRICE",
+      type = "NOTIFICATION",
+      title = "Annonce à annuler",
+      content = "Contenu",
+      priority = "IMPORTANTE",
+      targetAudience = "TOUS",
+      startEpochMs = now,
+      endEpochMs = now + 86400000L,
+      durationDays = 1,
+      status = "ACTIVE",
+      version = 1,
+      createdAtEpochMs = now,
+      updatedAtEpochMs = now,
+      syncStatus = "SYNCED"
+    )
+
+    annDao.insertOrUpdate(ann)
+    annDao.updateStatus("ann_cancel", "CANCELLED", now + 1000L)
+
+    val updated = annDao.getAnnouncementById("ann_cancel")
+    assertNotNull(updated)
+    assertEquals("CANCELLED", updated!!.status)
+  }
+
+  @Test
+  fun `test Announcement read receipt idempotency and timestamp update`() = runBlocking {
+    val receiptDao = database.announcementReceiptDao()
+    val firstRead = 1000L
+    val secondRead = 5000L
+
+    val receiptInitial = AnnouncementReceiptEntity(
+      id = "ann_1_u_worker_v1",
+      announcementId = "ann_1",
+      companyId = "company_1",
+      recipientUserId = "u_worker",
+      recipientName = "Fatma Dridi",
+      recipientRole = "OUVRIERE",
+      firstReadAtEpochMs = firstRead,
+      lastReadAtEpochMs = firstRead,
+      announcementVersion = 1,
+      syncStatus = "SYNCED"
+    )
+
+    receiptDao.insertOrUpdate(receiptInitial)
+
+    // Re-opening the announcement updates lastReadAt while preserving firstReadAt
+    val receiptUpdated = receiptInitial.copy(lastReadAtEpochMs = secondRead)
+    receiptDao.insertOrUpdate(receiptUpdated)
+
+    val list = receiptDao.getReceiptsForAnnouncement("ann_1").first()
+    assertEquals(1, list.size) // Exact single row maintained!
+    assertEquals(firstRead, list[0].firstReadAtEpochMs)
+    assertEquals(secondRead, list[0].lastReadAtEpochMs)
+    assertEquals("Fatma Dridi", list[0].recipientName)
+  }
+
+  @Test
+  fun `test Announcements company isolation prevents data leak`() = runBlocking {
+    val annDao = database.workshopAnnouncementDao()
+    val now = System.currentTimeMillis()
+
+    val annA = WorkshopAnnouncementEntity(
+      id = "ann_a", companyId = "company_A", authorId = "u_a", authorName = "Dir A", authorRole = "DIRECTRICE",
+      type = "INFORMATION", title = "Annonce A", content = "Secret A", priority = "NORMALE", targetAudience = "TOUS",
+      startEpochMs = now, endEpochMs = now + 86400000L, durationDays = 1, status = "ACTIVE", version = 1,
+      createdAtEpochMs = now, updatedAtEpochMs = now, syncStatus = "SYNCED"
+    )
+    val annB = WorkshopAnnouncementEntity(
+      id = "ann_b", companyId = "company_B", authorId = "u_b", authorName = "Dir B", authorRole = "DIRECTRICE",
+      type = "INFORMATION", title = "Annonce B", content = "Secret B", priority = "NORMALE", targetAudience = "TOUS",
+      startEpochMs = now, endEpochMs = now + 86400000L, durationDays = 1, status = "ACTIVE", version = 1,
+      createdAtEpochMs = now, updatedAtEpochMs = now, syncStatus = "SYNCED"
+    )
+
+    annDao.insertOrUpdate(annA)
+    annDao.insertOrUpdate(annB)
+
+    val listA = annDao.getAnnouncementsForCompany("company_A").first()
+    assertEquals(1, listA.size)
+    assertEquals("Annonce A", listA[0].title)
+
+    val listB = annDao.getAnnouncementsForCompany("company_B").first()
+    assertEquals(1, listB.size)
+    assertEquals("Annonce B", listB[0].title)
+  }
+
+  @Test
+  fun `test Audit log inserts events and queries chronologically by company`() = runBlocking {
+    val auditDao = database.auditEventDao()
+    val companyId = "comp_audit_01"
+    val t1 = 1000000000L
+    val t2 = 2000000000L
+    val t3 = 3000000000L
+
+    val event1 = AuditEventEntity(
+      id = "ev_1",
+      companyId = companyId,
+      actionType = AuditActionType.POINTAGE_SAVED.name,
+      actorId = "u_chafa",
+      actorName = "Salma Ben Amor",
+      actorRole = "CHAFE",
+      detailsFr = "Pointage enregistré pour 12 opératrices",
+      timestampEpochMs = t1,
+      syncStatus = "SYNCED"
+    )
+    val event2 = AuditEventEntity(
+      id = "ev_2",
+      companyId = companyId,
+      actionType = AuditActionType.ADVANCE_RECORDED.name,
+      actorId = "u_directrice",
+      actorName = "Fatma Directrice",
+      actorRole = "DIRECTRICE",
+      detailsFr = "Acompte de 50.000 TND accordé à Amina",
+      timestampEpochMs = t2,
+      syncStatus = "SYNCED"
+    )
+    val event3 = AuditEventEntity(
+      id = "ev_3",
+      companyId = companyId,
+      actionType = AuditActionType.PERMISSION_CHANGED.name,
+      actorId = "u_directrice",
+      actorName = "Fatma Directrice",
+      actorRole = "DIRECTRICE",
+      detailsFr = "Permissions Châfa mises à jour",
+      timestampEpochMs = t3,
+      syncStatus = "SYNCED"
+    )
+
+    auditDao.insertAudit(event1)
+    auditDao.insertAudit(event2)
+    auditDao.insertAudit(event3)
+
+    val list = auditDao.getAuditEvents(companyId).first()
+    assertEquals(3, list.size)
+    // Verify chronological descending order (newest first)
+    assertEquals("ev_3", list[0].id)
+    assertEquals(t3, list[0].timestampEpochMs)
+    assertEquals(AuditActionType.PERMISSION_CHANGED.name, list[0].actionType)
+
+    assertEquals("ev_2", list[1].id)
+    assertEquals(t2, list[1].timestampEpochMs)
+
+    assertEquals("ev_1", list[2].id)
+    assertEquals(t1, list[2].timestampEpochMs)
+    assertEquals("CHAFE", list[2].actorRole)
+
+    // Test domain conversion and Tunis time formatting
+    val domainEvent = list[0].toDomain()
+    assertTrue(domainEvent.formattedDateTimeTunis.contains("Heure de Tunis"))
+  }
+
+  @Test
+  fun `test Audit log strictly isolates events between workshops`() = runBlocking {
+    val auditDao = database.auditEventDao()
+
+    val evA = AuditEventEntity(
+      id = "ev_a",
+      companyId = "company_Alpha",
+      actionType = AuditActionType.COMPANY_UPDATED.name,
+      actorId = "dir_a",
+      actorName = "Directrice Alpha",
+      actorRole = "DIRECTRICE",
+      detailsFr = "Mise à jour atelier Alpha",
+      timestampEpochMs = 1500L,
+      syncStatus = "SYNCED"
+    )
+    val evB = AuditEventEntity(
+      id = "ev_b",
+      companyId = "company_Beta",
+      actionType = AuditActionType.COMPANY_UPDATED.name,
+      actorId = "dir_b",
+      actorName = "Directrice Beta",
+      actorRole = "DIRECTRICE",
+      detailsFr = "Mise à jour atelier Beta",
+      timestampEpochMs = 1600L,
+      syncStatus = "SYNCED"
+    )
+
+    auditDao.insertAudit(evA)
+    auditDao.insertAudit(evB)
+
+    val listA = auditDao.getAuditEvents("company_Alpha").first()
+    assertEquals(1, listA.size)
+    assertEquals("ev_a", listA[0].id)
+    assertEquals("company_Alpha", listA[0].companyId)
+
+    val listB = auditDao.getAuditEvents("company_Beta").first()
+    assertEquals(1, listB.size)
+    assertEquals("ev_b", listB[0].id)
+    assertEquals("company_Beta", listB[0].companyId)
+  }
+
+  @Test
+  fun `test Company profile updates and persists in Room`() = runBlocking {
+    val profileDao = database.companyProfileDao()
+    val companyId = "atelier_test_01"
+
+    val profile = CompanyProfileEntity(
+      companyId = companyId,
+      name = "Atelier Couture Nabd",
+      ownerId = "owner_123",
+      ownerName = "Mme Fatma",
+      matriculeFiscal = "1458921/A/M/000",
+      address = "Charguia 1, Tunis",
+      phone = "+216 71 840 220",
+      standardDailyHours = 8,
+      referenceRateMillimes = 3500L,
+      currency = "TND"
+    )
+
+    profileDao.insertOrUpdate(profile)
+
+    val retrieved = profileDao.getCompanyProfile(companyId).first()
+    assertNotNull(retrieved)
+    assertEquals("Atelier Couture Nabd", retrieved?.name)
+    assertEquals("1458921/A/M/000", retrieved?.matriculeFiscal)
+    assertEquals(8, retrieved?.standardDailyHours)
+
+    // Update with new phone and 9h standard
+    val updated = profile.copy(phone = "+216 71 999 888", standardDailyHours = 9)
+    profileDao.insertOrUpdate(updated)
+
+    val retrievedUpdated = profileDao.getCompanyProfile(companyId).first()
+    assertEquals("+216 71 999 888", retrievedUpdated?.phone)
+    assertEquals(9, retrievedUpdated?.standardDailyHours)
+  }
+
+  @Test
+  fun `test Chafa permissions matrix persists and updates accurately`() = runBlocking {
+    val permDao = database.chafaPermissionsDao()
+    val companyId = "atelier_perms_01"
+
+    val perms = ChafaPermissionsEntity(
+      companyId = companyId,
+      canEditPastAttendance = false,
+      canRecordAdvances = true,
+      canPublishAnnouncements = false,
+      canViewPayrollFinancials = false,
+      canManageWorkers = false,
+      canViewAuditLogs = true,
+      lastUpdatedEpochMs = 1000L
+    )
+
+    permDao.insertOrUpdate(perms)
+
+    val initial = permDao.getPermissions(companyId).first()
+    assertNotNull(initial)
+    assertEquals(false, initial?.canEditPastAttendance)
+    assertEquals(true, initial?.canRecordAdvances)
+
+    // Directrice authorizes Chafa to edit past attendance and manage workers
+    val updated = perms.copy(canEditPastAttendance = true, canManageWorkers = true, lastUpdatedEpochMs = 2000L)
+    permDao.insertOrUpdate(updated)
+
+    val modified = permDao.getPermissions(companyId).first()
+    assertEquals(true, modified?.canEditPastAttendance)
+    assertEquals(true, modified?.canManageWorkers)
+    assertEquals(true, modified?.canRecordAdvances)
+    assertEquals(false, modified?.canPublishAnnouncements)
+  }
+
+  @Test
+  fun `test Device session tracking and revocation in Room`() = runBlocking {
+    val sessionDao = database.deviceSessionDao()
+    val companyId = "comp_sess_01"
+
+    val tablet = DeviceSessionEntity(
+      id = "sess_tab",
+      companyId = companyId,
+      userId = "u_dir",
+      userName = "Directrice",
+      userRole = "DIRECTRICE",
+      deviceName = "Samsung Galaxy Tab A9",
+      deviceType = "TABLET",
+      ipOrLocation = "Tunis, Tunisie",
+      isCurrentDevice = true,
+      isRevoked = false,
+      lastActiveEpochMs = 1000L
+    )
+    val phone = DeviceSessionEntity(
+      id = "sess_phone",
+      companyId = companyId,
+      userId = "u_chafa",
+      userName = "Salma Châfa",
+      userRole = "CHAFE",
+      deviceName = "Redmi Note 12",
+      deviceType = "PHONE",
+      ipOrLocation = "Tunis, Tunisie",
+      isCurrentDevice = false,
+      isRevoked = false,
+      lastActiveEpochMs = 2000L
+    )
+
+    sessionDao.insertAll(listOf(tablet, phone))
+
+    val list = sessionDao.getSessions(companyId).first()
+    assertEquals(2, list.size)
+    assertEquals(false, list.find { it.id == "sess_phone" }?.isRevoked)
+
+    // Revoke access for the phone
+    sessionDao.revokeSession("sess_phone")
+
+    val listAfterRevoke = sessionDao.getSessions(companyId).first()
+    val revokedPhone = listAfterRevoke.find { it.id == "sess_phone" }
+    val activeTablet = listAfterRevoke.find { it.id == "sess_tab" }
+
+    assertEquals(true, revokedPhone?.isRevoked)
+    assertEquals(false, activeTablet?.isRevoked)
+  }
 }
+
+
+

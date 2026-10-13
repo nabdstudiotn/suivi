@@ -55,6 +55,7 @@ import com.example.ui.theme.NabdSurfaceWhite
 fun SectionNavigationBar(
     currentSection: AtelierSection,
     onSectionSelected: (AtelierSection) -> Unit,
+    unreadCommunicationCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -128,6 +129,22 @@ fun SectionNavigationBar(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp
                         )
+                        if (section == AtelierSection.COMMUNICATION && unreadCommunicationCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(if (isSelected) Color.White else com.example.ui.theme.NabdCoralText)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = unreadCommunicationCount.toString(),
+                                    color = if (isSelected) com.example.ui.theme.NabdPurple else Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                 }
             }

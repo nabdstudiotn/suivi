@@ -103,6 +103,134 @@ service cloud.firestore {
         isValidTimestamp(data.createdAt);
     }
 
+    // --- Communication Rules Functions ---
+    function isValidCompany(data, companyId) {
+      return data.id == companyId &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        (!('matriculeFiscal' in data) || (data.matriculeFiscal is string && data.matriculeFiscal.size() <= 50)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 200)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 30)) &&
+        (!('standardDailyHours' in data) || (data.standardDailyHours is int && data.standardDailyHours >= 1 && data.standardDailyHours <= 24)) &&
+        (!('referenceRateMillimes' in data) || (data.referenceRateMillimes is int && data.referenceRateMillimes >= 0)) &&
+        (!('currency' in data) || (data.currency is string && data.currency.size() <= 10)) &&
+        (!('updatedAt' in data) || isValidTimestamp(data.updatedAt)) &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidCompanyMember(data, companyId, memberId) {
+      return data.userId == memberId &&
+        data.companyId == companyId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.role in ['DIRECTRICE', 'CHAFE', 'OUVRIERE', 'admin', 'supervisor', 'worker'] &&
+        data.status in ['ACTIVE', 'SUSPENDED'] &&
+        data.canPostGroup is bool &&
+        data.canDirectMessage is bool &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidChatConversation(data, conversationId, companyId) {
+      return data.id == conversationId &&
+        data.companyId == companyId &&
+        data.type in ['GROUP', 'DIRECT'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 150 &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidChatMessage(data, messageId, conversationId, companyId) {
+      return data.id == messageId &&
+        data.conversationId == conversationId &&
+        data.companyId == companyId &&
+        data.type in ['GROUP', 'DIRECT'] &&
+        data.senderId == request.auth.uid &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+        data.senderRole in ['DIRECTRICE', 'CHAFE', 'OUVRIERE', 'admin', 'supervisor', 'worker'] &&
+        (!('recipientId' in data) || (data.recipientId is string && data.recipientId.size() <= 128)) &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+        data.clientTimestamp is int && data.clientTimestamp > 0 &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidWorkshopAnnouncement(data, announcementId, companyId) {
+      return data.id == announcementId &&
+        data.companyId == companyId &&
+        data.authorId == request.auth.uid &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100 &&
+        data.authorRole in ['DIRECTRICE', 'CHAFE', 'OUVRIERE'] &&
+        data.type in ['INFORMATION', 'NOTIFICATION', 'SECURITE', 'ORGANISATION'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.content is string && data.content.size() >= 1 && data.content.size() <= 4000 &&
+        data.priority in ['NORMALE', 'IMPORTANTE', 'URGENTE'] &&
+        data.targetAudience in ['TOUS', 'CHAFAS_ONLY', 'OUVRIERES_ONLY'] &&
+        data.startEpochMs is int && data.startEpochMs > 0 &&
+        data.endEpochMs is int && data.endEpochMs >= data.startEpochMs &&
+        data.durationDays is int && data.durationDays >= 1 &&
+        data.status in ['ACTIVE', 'EXPIRED', 'CANCELLED'] &&
+        data.version is int && data.version >= 1 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAnnouncementReceipt(data, announcementId, companyId, userId) {
+      return data.companyId == companyId &&
+        data.announcementId == announcementId &&
+        data.recipientUserId == userId &&
+        data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 100 &&
+        data.recipientRole in ['DIRECTRICE', 'CHAFE', 'OUVRIERE'] &&
+        data.firstReadAtEpochMs is int && data.firstReadAtEpochMs > 0 &&
+        data.lastReadAtEpochMs is int && data.lastReadAtEpochMs >= data.firstReadAtEpochMs &&
+        data.announcementVersion is int && data.announcementVersion >= 1 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAuditEntry(data, companyId) {
+      return data.companyId == companyId &&
+        data.actorId == request.auth.uid &&
+        data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 100 &&
+        data.timestampEpochMs is int &&
+        isValidTimestamp(data.createdAt);
+    }
+
+    function isValidDeviceSession(data, companyId, sessionId) {
+      return data.id == sessionId &&
+        data.companyId == companyId &&
+        data.userId is string && data.userId.size() >= 1 &&
+        data.userName is string && data.userName.size() >= 1 &&
+        data.deviceName is string && data.deviceName.size() >= 1 &&
+        data.lastActiveEpochMs is int &&
+        data.isRevoked is bool &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPermissions(data, companyId) {
+      return data.companyId == companyId &&
+        data.canEditPastAttendance is bool &&
+        data.canRecordAdvances is bool &&
+        data.canPublishAnnouncements is bool &&
+        data.canViewPayrollFinancials is bool &&
+        data.canManageWorkers is bool &&
+        data.canViewAuditLogs is bool &&
+        (!('canCloseArchive' in data) || data.canCloseArchive is bool) &&
+        data.lastUpdatedEpochMs is int &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMonthClosure(data, companyId, yearMonth) {
+      return data.companyId == companyId &&
+        data.yearMonth == yearMonth &&
+        data.status in ['OUVERT', 'CLOTURE', 'EN_REVISION'] &&
+        data.closedBy is string && data.closedBy.size() >= 1 && data.closedBy.size() <= 100 &&
+        data.closedByRole in ['DIRECTRICE', 'CHAFE', 'OUVRIERE'] &&
+        data.closedAtEpochMs is int &&
+        data.revisionCount is int && data.revisionCount >= 0 &&
+        (!('revisionReason' in data) || (data.revisionReason is string && data.revisionReason.size() <= 500)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    // --- Users Path ---
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId) && isValidUserProfile(request.resource.data, userId);
@@ -150,5 +278,97 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
     }
+
+    // --- Companies & Real Communication Isolation ---
+    match /companies/{companyId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidCompany(request.resource.data, companyId);
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidCompanyMember(request.resource.data, companyId, memberId);
+        allow delete: if isAuthenticated() && request.auth.uid == memberId;
+      }
+
+      match /conversations/{conversationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidChatConversation(request.resource.data, conversationId, companyId);
+        allow delete: if false;
+
+        match /messages/{messageId} {
+          allow read: if isAuthenticated() &&
+            (resource.data.type == 'GROUP' ||
+             resource.data.senderId == request.auth.uid ||
+             resource.data.recipientId == request.auth.uid ||
+             (('participantUids' in resource.data) && request.auth.uid in resource.data.participantUids));
+          allow create, update: if isAuthenticated() &&
+            request.resource.data.senderId == request.auth.uid &&
+            request.resource.data.companyId == companyId &&
+            isValidChatMessage(request.resource.data, messageId, conversationId, companyId);
+          allow delete: if false;
+        }
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if isAuthenticated() && resource.data.companyId == companyId;
+        allow create: if isAuthenticated() &&
+          request.resource.data.companyId == companyId &&
+          request.resource.data.authorId == request.auth.uid &&
+          isValidWorkshopAnnouncement(request.resource.data, announcementId, companyId);
+        allow update: if isAuthenticated() &&
+          request.resource.data.companyId == companyId &&
+          (resource.data.authorId == request.auth.uid) &&
+          isValidWorkshopAnnouncement(request.resource.data, announcementId, companyId);
+        allow delete: if false;
+
+        match /receipts/{userId} {
+          allow read: if isAuthenticated() &&
+            (request.auth.uid == userId ||
+             request.auth.uid == get(/databases/$(database)/documents/companies/$(companyId)/announcements/$(announcementId)).data.authorId);
+          allow create, update: if isAuthenticated() &&
+            request.auth.uid == userId &&
+            request.resource.data.companyId == companyId &&
+            request.resource.data.announcementId == announcementId &&
+            request.resource.data.recipientUserId == userId &&
+            isValidAnnouncementReceipt(request.resource.data, announcementId, companyId, userId);
+          allow delete: if false;
+        }
+      }
+
+      match /audit_logs/{auditId} {
+        allow read: if isAuthenticated() && resource.data.companyId == companyId;
+        allow create: if isAuthenticated() &&
+          request.resource.data.companyId == companyId &&
+          request.resource.data.actorId == request.auth.uid &&
+          isValidAuditEntry(request.resource.data, companyId);
+        allow update, delete: if false;
+      }
+
+      match /sessions/{sessionId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() &&
+          request.resource.data.companyId == companyId &&
+          isValidDeviceSession(request.resource.data, companyId, sessionId);
+        allow delete: if false;
+      }
+
+      match /permissions/{permissionId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() &&
+          request.resource.data.companyId == companyId &&
+          isValidPermissions(request.resource.data, companyId);
+        allow delete: if false;
+      }
+
+      match /month_closures/{yearMonth} {
+        allow read: if isAuthenticated() && resource.data.companyId == companyId;
+        allow create, update: if isAuthenticated() &&
+          request.resource.data.companyId == companyId &&
+          isValidMonthClosure(request.resource.data, companyId, yearMonth);
+        allow delete: if false;
+      }
+    }
   }
 }
+
