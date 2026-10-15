@@ -35,6 +35,46 @@ after(async () => {
 beforeEach(async () => {
   if (testEnv) {
     await testEnv.clearFirestore();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection("companies").doc(COMPANY_A).set({
+        id: COMPANY_A,
+        name: "Atelier A",
+        ownerId: ALICE_UID,
+        ownerName: "Alice Directrice",
+        phone: "+21600000000",
+        createdAt: new Date(),
+      });
+      await db.collection("companies").doc(COMPANY_B).set({
+        id: COMPANY_B,
+        name: "Atelier B",
+        ownerId: CHARLIE_UID,
+        ownerName: "Charlie",
+        createdAt: new Date(),
+      });
+      await db.collection("companies").doc(COMPANY_A).collection("members").doc(ALICE_UID).set({
+        id: `${COMPANY_A}_${ALICE_UID}`,
+        companyId: COMPANY_A,
+        userId: ALICE_UID,
+        displayName: "Alice Directrice",
+        role: "DIRECTRICE",
+        status: "ACTIVE",
+        canPostGroup: true,
+        canDirectMessage: true,
+        createdAt: new Date(),
+      });
+      await db.collection("companies").doc(COMPANY_A).collection("members").doc(BOB_UID).set({
+        id: `${COMPANY_A}_${BOB_UID}`,
+        companyId: COMPANY_A,
+        userId: BOB_UID,
+        displayName: "Bob Ouvrière",
+        role: "OUVRIERE",
+        status: "ACTIVE",
+        canPostGroup: false,
+        canDirectMessage: true,
+        createdAt: new Date(),
+      });
+    });
   }
 });
 
@@ -578,3 +618,46 @@ test("Month Closures: Invalid status is rejected", async () => {
 
 
 
+
+test("Membership security: an active worker cannot promote or suspend herself", async () => {
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertFails(
+    bobDb.collection("companies").doc(COMPANY_A).collection("members").doc(BOB_UID).update({
+      role: "DIRECTRICE",
+      status: "ACTIVE",
+    })
+  );
+});
+
+test("Join request security: requester can create PENDING but cannot approve herself", async () => {
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const request = {
+    id: `req_${COMPANY_A}_${BOB_UID}`,
+    companyId: COMPANY_A,
+    companyName: "Atelier A",
+    userId: BOB_UID,
+    userEmail: "bob@example.com",
+    userFullName: "Bob Ouvrière",
+    userPhone: "+21611111111",
+    requestedRole: "OUVRIERE",
+    status: "PENDING",
+    createdAtEpochMs: Date.now(),
+    createdAt: new Date(),
+  };
+  await assertSucceeds(
+    bobDb.collection("companies").doc(COMPANY_A).collection("join_requests").doc(request.id).set(request)
+  );
+  await assertFails(
+    bobDb.collection("companies").doc(COMPANY_A).collection("join_requests").doc(request.id).update({
+      status: "APPROVED",
+      finalRole: "DIRECTRICE",
+    })
+  );
+});
+
+test("Company isolation: Alice cannot read members of a company where she is not a member", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  await assertFails(
+    aliceDb.collection("companies").doc(COMPANY_B).collection("members").doc(CHARLIE_UID).get()
+  );
+});

@@ -141,16 +141,13 @@ class SettingsRepository(
         displayName: String,
         phone: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        val uid = auth.currentUser?.uid ?: "directrice_suivi_01"
+        val uid = auth.currentUser?.uid ?: return@withContext Result.failure(IllegalStateException("Session expirée."))
         try {
-            // Update Firestore user document if possible
-            try {
-                firestore.collection("users").document(uid).update(
-                    "displayName", displayName.trim(),
-                    "phone", phone.trim(),
-                    "updatedAt", FieldValue.serverTimestamp()
-                ).await()
-            } catch (_: Exception) {}
+            firestore.collection("users").document(uid).update(
+                "displayName", displayName.trim(),
+                "phone", phone.trim(),
+                "updatedAt", FieldValue.serverTimestamp()
+            ).await()
 
             logAuditEvent(
                 companyId = companyId,
@@ -182,7 +179,7 @@ class SettingsRepository(
             val updated = CompanyProfile(
                 companyId = companyId,
                 name = name.trim(),
-                ownerId = auth.currentUser?.uid ?: "directrice_suivi_01",
+                ownerId = auth.currentUser?.uid ?: throw IllegalStateException("Session expirée."),
                 matriculeFiscal = matriculeFiscal.trim(),
                 address = address.trim(),
                 phone = phone.trim(),
@@ -190,27 +187,21 @@ class SettingsRepository(
                 referenceRateMillimes = referenceRateMillimes,
                 currency = "TND"
             )
+            val payload = mapOf(
+                "id" to companyId,
+                "name" to updated.name,
+                "ownerId" to updated.ownerId,
+                "matriculeFiscal" to updated.matriculeFiscal,
+                "address" to updated.address,
+                "phone" to updated.phone,
+                "standardDailyHours" to updated.standardDailyHours,
+                "referenceRateMillimes" to updated.referenceRateMillimes,
+                "currency" to "TND",
+                "updatedAt" to FieldValue.serverTimestamp(),
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            firestore.collection("companies").document(companyId).set(payload).await()
             companyProfileDao.insertOrUpdate(CompanyProfileEntity.fromDomain(updated))
-
-            // Cloud persistence
-            try {
-                val payload = mapOf(
-                    "id" to companyId,
-                    "name" to updated.name,
-                    "ownerId" to updated.ownerId,
-                    "matriculeFiscal" to updated.matriculeFiscal,
-                    "address" to updated.address,
-                    "phone" to updated.phone,
-                    "standardDailyHours" to updated.standardDailyHours,
-                    "referenceRateMillimes" to updated.referenceRateMillimes,
-                    "currency" to "TND",
-                    "updatedAt" to FieldValue.serverTimestamp(),
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId).set(payload).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore company update warning: ${e.message}")
-            }
 
             logAuditEvent(
                 companyId = companyId,
@@ -238,11 +229,7 @@ class SettingsRepository(
                 companyId = companyId,
                 lastUpdatedEpochMs = System.currentTimeMillis()
             )
-            chafaPermissionsDao.insertOrUpdate(ChafaPermissionsEntity.fromDomain(updated))
-
-            // Cloud persistence
-            try {
-                val payload = mapOf(
+            val payload = mapOf(
                     "companyId" to companyId,
                     "canEditPastAttendance" to updated.canEditPastAttendance,
                     "canRecordAdvances" to updated.canRecordAdvances,
@@ -254,12 +241,10 @@ class SettingsRepository(
                     "lastUpdatedEpochMs" to updated.lastUpdatedEpochMs,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-                firestore.collection("companies").document(companyId)
-                    .collection("permissions").document("chafa_default")
-                    .set(payload).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore permissions update warning: ${e.message}")
-            }
+            firestore.collection("companies").document(companyId)
+                .collection("permissions").document("chafa_default")
+                .set(payload).await()
+            chafaPermissionsDao.insertOrUpdate(ChafaPermissionsEntity.fromDomain(updated))
 
             logAuditEvent(
                 companyId = companyId,
@@ -283,18 +268,13 @@ class SettingsRepository(
         sessionId: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            firestore.collection("companies").document(companyId)
+                .collection("sessions").document(sessionId)
+                .update(
+                    "isRevoked", true,
+                    "updatedAt", FieldValue.serverTimestamp()
+                ).await()
             sessionDao.revokeSession(sessionId)
-
-            try {
-                firestore.collection("companies").document(companyId)
-                    .collection("sessions").document(sessionId)
-                    .update(
-                        "isRevoked", true,
-                        "updatedAt", FieldValue.serverTimestamp()
-                    ).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore session revoke warning: ${e.message}")
-            }
 
             logAuditEvent(
                 companyId = companyId,
@@ -323,7 +303,7 @@ class SettingsRepository(
         metadata: Map<String, String> = emptyMap()
     ): AuditEvent = withContext(Dispatchers.IO) {
         val user = auth.currentUser
-        val uid = user?.uid ?: "directrice_suivi_01"
+        val uid = user?.uid ?: throw IllegalStateException("Session expirée.")
         val member = memberDao.getMember(companyId, uid)?.toDomain()
         val actorName = member?.displayName ?: user?.displayName ?: "Directrice Générale"
         val actorRole = member?.role ?: MemberRole.DIRECTRICE
@@ -347,12 +327,7 @@ class SettingsRepository(
             syncStatus = MessageSyncStatus.PENDING
         )
 
-        // 1. Room immediate insertion
-        auditDao.insertAudit(AuditEventEntity.fromDomain(event))
-
-        // 2. Cloud Firestore synchronization
-        try {
-            val payload = mapOf(
+        val payload = mapOf(
                 "id" to eventId,
                 "companyId" to companyId,
                 "action" to actionType.name,
@@ -365,15 +340,10 @@ class SettingsRepository(
                 "timestampEpochMs" to now,
                 "createdAt" to FieldValue.serverTimestamp()
             )
-            firestore.collection("companies").document(companyId)
-                .collection("audit_logs").document(eventId)
-                .set(payload).await()
-
-            auditDao.updateSyncStatus(eventId, MessageSyncStatus.SYNCED.name)
-            event.copy(syncStatus = MessageSyncStatus.SYNCED)
-        } catch (e: Exception) {
-            Log.w(TAG, "Audit log Firestore sync deferred: ${e.message}")
-            event
-        }
+        firestore.collection("companies").document(companyId)
+            .collection("audit_logs").document(eventId)
+            .set(payload).await()
+        auditDao.insertAudit(AuditEventEntity.fromDomain(event.copy(syncStatus = MessageSyncStatus.SYNCED)))
+        event.copy(syncStatus = MessageSyncStatus.SYNCED)
     }
 }

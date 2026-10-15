@@ -144,26 +144,19 @@ class AuthRepository(
         )
         userAccountDao.insertOrUpdate(localUser)
 
-        // Sync user doc in Firestore
-        try {
-            val userPayload = mapOf(
-                "userId" to uid,
-                "email" to email,
-                "displayName" to name,
-                "role" to "manager",
-                "createdAt" to FieldValue.serverTimestamp()
-            )
-            firestore.collection("users").document(uid).set(userPayload, SetOptions.merge()).await()
-        } catch (e: Exception) {
-            Log.w(TAG, "Firestore user profile sync warning: ${e.message}")
-        }
-
-        // Pull memberships from Firestore
+        // Firestore is the source of truth. Do not report a usable session when this fails.
+        val userPayload = mapOf(
+            "userId" to uid,
+            "email" to email,
+            "displayName" to name,
+            "role" to "manager",
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        firestore.collection("users").document(uid).set(userPayload, SetOptions.merge()).await()
         pullUserMembershipsFromCloud(uid)
     }
 
     suspend fun pullUserMembershipsFromCloud(uid: String) = withContext(Dispatchers.IO) {
-        try {
             val snapshot = firestore.collection("users").document(uid).collection("memberships").get().await()
             val list = mutableListOf<CompanyMemberEntity>()
             for (doc in snapshot.documents) {
@@ -214,13 +207,9 @@ class AuthRepository(
                 )
                 joinRequestDao.insertOrUpdate(req)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "pullUserMembershipsFromCloud warning: ${e.message}")
-        }
     }
 
     suspend fun pullPendingRequestsForCompany(companyId: String) = withContext(Dispatchers.IO) {
-        try {
             val snapshot = firestore.collection("companies").document(companyId)
                 .collection("join_requests")
                 .whereEqualTo("status", "PENDING")
@@ -245,9 +234,6 @@ class AuthRepository(
                 )
                 joinRequestDao.insertOrUpdate(req)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "pullPendingRequestsForCompany warning: ${e.message}")
-        }
     }
 
     // -------------------------------------------------------------
@@ -264,31 +250,18 @@ class AuthRepository(
         val user = auth.currentUser ?: return@withContext Result.failure(IllegalStateException("Session expirée. Veuillez vous reconnecter."))
         val uid = user.uid
         val email = user.email ?: ""
-
         try {
-            // Generate unique random company ID and safe 8-char short code
-            val randomIdPart = UUID.randomUUID().toString().replace("-", "").take(8)
-            val companyId = "comp_$randomIdPart"
+            require(companyName.trim().isNotEmpty()) { "Le nom de l'entreprise est obligatoire." }
+            require(managerFullName.trim().isNotEmpty()) { "Le nom de la directrice est obligatoire." }
+            val companyId = "comp_${UUID.randomUUID().toString().replace("-", "").take(8)}"
             val shortCode = "NABD-${Random.nextInt(1000, 9999)}"
-
             val now = System.currentTimeMillis()
-
-            // 1. Company Record
-            val company = Company(
-                id = companyId,
-                name = companyName.trim(),
-                ownerId = uid,
-                ownerName = managerFullName.trim(),
-                phone = companyPhone.trim(),
-                companyCode = shortCode,
-                createdAtEpochMs = now
-            )
-            companyDao.insertOrUpdate(CompanyEntity.fromDomain(company))
-
-            // 2. Company Profile
+            val company = Company(companyId, companyName.trim(), uid, managerFullName.trim(), companyPhone.trim(), shortCode, createdAtEpochMs = now)
+            val member = CompanyMember(companyId, uid, managerFullName.trim(), MemberRole.DIRECTRICE, MembershipStatus.ACTIVE,
+                company.name, canPostGroup = true, canDirectMessage = true, createdAtEpochMs = now)
             val profile = CompanyProfile(
                 companyId = companyId,
-                name = companyName.trim(),
+                name = company.name,
                 ownerId = uid,
                 ownerName = managerFullName.trim(),
                 address = companyAddress.ifBlank { "Tunis, Tunisie" },
@@ -297,123 +270,56 @@ class AuthRepository(
                 referenceRateMillimes = 3500L,
                 currency = "TND"
             )
+            val perms = ChafaPermissions(companyId, false, true, false, false, false, true, false)
+            val auditId = UUID.randomUUID().toString()
+            val companyRef = firestore.collection("companies").document(companyId)
+            val memberRef = companyRef.collection("members").document(uid)
+            val membershipRef = firestore.collection("users").document(uid).collection("memberships").document(companyId)
+            val userRef = firestore.collection("users").document(uid)
+            val batch = firestore.batch()
+            batch.set(companyRef, mapOf(
+                "id" to companyId, "name" to company.name, "ownerId" to uid,
+                "ownerName" to company.ownerName, "phone" to company.phone,
+                "companyCode" to shortCode, "address" to profile.address,
+                "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp()))
+            batch.set(memberRef, mapOf(
+                "id" to member.id, "companyId" to companyId, "userId" to uid,
+                "displayName" to member.displayName, "role" to member.role.name,
+                "status" to member.status.name, "canPostGroup" to true,
+                "canDirectMessage" to true, "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()))
+            batch.set(membershipRef, mapOf(
+                "companyId" to companyId, "companyName" to company.name,
+                "role" to member.role.name, "status" to member.status.name,
+                "displayName" to member.displayName, "createdAtEpochMs" to now,
+                "updatedAt" to FieldValue.serverTimestamp()))
+            batch.set(userRef, mapOf(
+                "userId" to uid, "email" to email, "displayName" to managerFullName.trim(),
+                "role" to "manager", "createdAt" to FieldValue.serverTimestamp()), SetOptions.merge())
+            batch.set(companyRef.collection("permissions").document("chafa"), mapOf(
+                "companyId" to companyId, "canEditPastAttendance" to perms.canEditPastAttendance,
+                "canRecordAdvances" to perms.canRecordAdvances,
+                "canPublishAnnouncements" to perms.canPublishAnnouncements,
+                "canViewPayrollFinancials" to perms.canViewPayrollFinancials,
+                "canManageWorkers" to perms.canManageWorkers, "canViewAuditLogs" to perms.canViewAuditLogs,
+                "canCloseArchive" to perms.canCloseArchive, "lastUpdatedEpochMs" to now,
+                "updatedAt" to FieldValue.serverTimestamp()))
+            batch.set(companyRef.collection("audit_logs").document(auditId), mapOf(
+                "id" to auditId, "companyId" to companyId,
+                "actionType" to AuditActionType.COMPANY_CREATED.name, "actorId" to uid,
+                "actorName" to managerFullName.trim(), "actorRole" to MemberRole.DIRECTRICE.name,
+                "detailsFr" to "Création de l'entreprise ${company.name} (Code : $shortCode)",
+                "timestampEpochMs" to now, "createdAt" to FieldValue.serverTimestamp()))
+            batch.commit().await()
+
+            companyDao.insertOrUpdate(CompanyEntity.fromDomain(company))
             companyProfileDao.insertOrUpdate(CompanyProfileEntity.fromDomain(profile))
-
-            // 3. Central Permissions for company
-            val perms = ChafaPermissions(
-                companyId = companyId,
-                canEditPastAttendance = false,
-                canRecordAdvances = true,
-                canPublishAnnouncements = false,
-                canViewPayrollFinancials = false,
-                canManageWorkers = false,
-                canViewAuditLogs = true,
-                canCloseArchive = false
-            )
             permissionsDao.insertOrUpdate(ChafaPermissionsEntity.fromDomain(perms))
-
-            // 4. Membership: Owner is ACTIVE DIRECTRICE
-            val member = CompanyMember(
-                companyId = companyId,
-                userId = uid,
-                displayName = managerFullName.trim(),
-                role = MemberRole.DIRECTRICE,
-                status = MembershipStatus.ACTIVE,
-                companyName = companyName.trim(),
-                canPostGroup = true,
-                canDirectMessage = true,
-                createdAtEpochMs = now
-            )
             memberDao.insertOrUpdate(CompanyMemberEntity.fromDomain(member))
-
-            // 5. Update User Account
-            userAccountDao.insertOrUpdate(UserAccountEntity(
-                uid = uid,
-                email = email,
-                displayName = managerFullName.trim(),
-                phone = managerPhone.trim(),
-                createdAtEpochMs = now
-            ))
-
-            // 6. Firestore synchronization
-            try {
-                // Save Company
-                val companyPayload = mapOf(
-                    "id" to companyId,
-                    "name" to company.name,
-                    "ownerId" to uid,
-                    "ownerName" to company.ownerName,
-                    "phone" to company.phone,
-                    "companyCode" to company.companyCode,
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId).set(companyPayload).await()
-
-                // Save Member in Company
-                val memberPayload = mapOf(
-                    "id" to member.id,
-                    "companyId" to companyId,
-                    "userId" to uid,
-                    "displayName" to member.displayName,
-                    "role" to member.role.name,
-                    "status" to member.status.name,
-                    "canPostGroup" to member.canPostGroup,
-                    "canDirectMessage" to member.canDirectMessage,
-                    "createdAtEpochMs" to now,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId)
-                    .collection("members").document(uid).set(memberPayload).await()
-
-                // Save Membership in User's directory
-                val userMembershipPayload = mapOf(
-                    "companyId" to companyId,
-                    "companyName" to company.name,
-                    "role" to member.role.name,
-                    "status" to member.status.name,
-                    "displayName" to member.displayName,
-                    "createdAtEpochMs" to now,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("users").document(uid)
-                    .collection("memberships").document(companyId).set(userMembershipPayload).await()
-
-                // Permissions
-                val permsPayload = mapOf(
-                    "companyId" to companyId,
-                    "canEditPastAttendance" to false,
-                    "canRecordAdvances" to true,
-                    "canPublishAnnouncements" to false,
-                    "canViewPayroll" to false,
-                    "canManageWorkers" to false,
-                    "canViewAuditLogs" to true,
-                    "canCloseArchive" to false,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId)
-                    .collection("permissions").document("chafa").set(permsPayload).await()
-
-                // Audit event
-                val auditPayload = mapOf(
-                    "id" to UUID.randomUUID().toString(),
-                    "companyId" to companyId,
-                    "actionType" to AuditActionType.COMPANY_CREATED.name,
-                    "actorId" to uid,
-                    "actorName" to managerFullName.trim(),
-                    "actorRole" to MemberRole.DIRECTRICE.name,
-                    "detailsFr" to "Création de l'entreprise ${company.name} par $managerFullName (Code d'invitation : $shortCode)",
-                    "timestampEpochMs" to now,
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId)
-                    .collection("audit_logs").document(auditPayload["id"] as String).set(auditPayload).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore company creation sync warning: ${e.message}")
-            }
-
+            userAccountDao.insertOrUpdate(UserAccountEntity(uid, email, managerFullName.trim(), managerPhone.trim(), now))
             Result.success(member)
         } catch (e: Exception) {
-            Log.e(TAG, "createCompanyAndOwner failed: ${e.message}", e)
+            Log.e(TAG, "createCompanyAndOwner failed", e)
             Result.failure(e)
         }
     }
@@ -453,8 +359,8 @@ class AuthRepository(
             companyDao.insertOrUpdate(CompanyEntity.fromDomain(c))
             c
         } catch (e: Exception) {
-            Log.w(TAG, "searchCompanyByCodeOnline warning: ${e.message}")
-            null
+            Log.e(TAG, "searchCompanyByCodeOnline failed", e)
+            throw e
         }
     }
 
@@ -469,58 +375,29 @@ class AuthRepository(
         val user = auth.currentUser ?: return@withContext Result.failure(IllegalStateException("Non authentifié"))
         val uid = user.uid
         val email = user.email ?: ""
-        val requestId = "req_${companyId}_$uid"
-        val now = System.currentTimeMillis()
-
         try {
-            val req = JoinRequest(
-                id = requestId,
-                companyId = companyId,
-                companyName = companyName,
-                userId = uid,
-                userEmail = email,
-                userFullName = userFullName.trim(),
-                userPhone = userPhone.trim(),
-                requestedRole = requestedRole,
-                note = note?.trim()?.ifBlank { null },
-                status = JoinRequestStatus.PENDING,
-                createdAtEpochMs = now
-            )
-
-            // Save in Room
-            joinRequestDao.insertOrUpdate(JoinRequestEntity.fromDomain(req))
-
-            // Sync with Firestore
-            try {
-                val payload = mapOf(
-                    "id" to requestId,
-                    "companyId" to companyId,
-                    "companyName" to companyName,
-                    "userId" to uid,
-                    "userEmail" to email,
-                    "userFullName" to req.userFullName,
-                    "userPhone" to req.userPhone,
-                    "requestedRole" to requestedRole.name,
-                    "note" to req.note,
-                    "status" to "PENDING",
-                    "createdAtEpochMs" to now,
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-
-                // Save in company's join_requests
-                firestore.collection("companies").document(companyId)
-                    .collection("join_requests").document(requestId).set(payload).await()
-
-                // Mirror in user's directory for instant status monitoring
-                firestore.collection("users").document(uid)
-                    .collection("join_requests").document(requestId).set(payload).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore join request sync warning: ${e.message}")
+            require(requestedRole == MemberRole.OUVRIERE || requestedRole == MemberRole.CHAFE) {
+                "Seules les demandes Ouvrière ou Châfa sont autorisées."
             }
-
+            val requestId = "req_${companyId}_$uid"
+            val now = System.currentTimeMillis()
+            val req = JoinRequest(requestId, companyId, companyName.trim(), uid, email,
+                userFullName.trim(), userPhone.trim(), requestedRole, note?.trim()?.ifBlank { null },
+                JoinRequestStatus.PENDING, createdAtEpochMs = now)
+            val payload = mapOf(
+                "id" to requestId, "companyId" to companyId, "companyName" to req.companyName,
+                "userId" to uid, "userEmail" to email, "userFullName" to req.userFullName,
+                "userPhone" to req.userPhone, "requestedRole" to requestedRole.name,
+                "note" to req.note, "status" to JoinRequestStatus.PENDING.name,
+                "createdAtEpochMs" to now, "createdAt" to FieldValue.serverTimestamp())
+            val batch = firestore.batch()
+            batch.set(firestore.collection("companies").document(companyId).collection("join_requests").document(requestId), payload)
+            batch.set(firestore.collection("users").document(uid).collection("join_requests").document(requestId), payload)
+            batch.commit().await()
+            joinRequestDao.insertOrUpdate(JoinRequestEntity.fromDomain(req))
             Result.success(req)
         } catch (e: Exception) {
-            Log.e(TAG, "submitJoinRequest failed: ${e.message}", e)
+            Log.e(TAG, "submitJoinRequest failed", e)
             Result.failure(e)
         }
     }
@@ -534,243 +411,108 @@ class AuthRepository(
     }
 
     suspend fun approveJoinRequest(
-        companyId: String,
-        requestId: String,
-        finalRole: MemberRole,
-        assignedWorkerId: String?,
-        actorName: String,
-        actorUid: String
+        companyId: String, requestId: String, finalRole: MemberRole, assignedWorkerId: String?,
+        actorName: String, actorUid: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val reqEntity = joinRequestDao.getRequestById(requestId).map { it?.toDomain() }
+            require(finalRole == MemberRole.OUVRIERE || finalRole == MemberRole.CHAFE) { "Rôle final invalide." }
+            val requestRef = firestore.collection("companies").document(companyId).collection("join_requests").document(requestId)
+            val snapshot = requestRef.get().await()
+            check(snapshot.exists()) { "Demande d'adhésion introuvable." }
+            check(snapshot.getString("status") == JoinRequestStatus.PENDING.name) { "Cette demande a déjà été traitée." }
+            val targetUid = snapshot.getString("userId") ?: error("Demande invalide : utilisateur absent.")
+            val targetName = snapshot.getString("userFullName") ?: error("Demande invalide : nom absent.")
+            val companyName = snapshot.getString("companyName") ?: "Atelier"
             val now = System.currentTimeMillis()
+            val auditId = UUID.randomUUID().toString()
+            val memberPayload = mapOf(
+                "id" to "${companyId}_$targetUid", "companyId" to companyId, "userId" to targetUid,
+                "displayName" to targetName, "role" to finalRole.name, "status" to MembershipStatus.ACTIVE.name,
+                "canPostGroup" to false, "canDirectMessage" to true, "assignedWorkerId" to assignedWorkerId,
+                "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp())
+            val membershipPayload = mapOf(
+                "companyId" to companyId, "companyName" to companyName, "role" to finalRole.name,
+                "status" to MembershipStatus.ACTIVE.name, "displayName" to targetName,
+                "assignedWorkerId" to assignedWorkerId, "createdAtEpochMs" to now,
+                "updatedAt" to FieldValue.serverTimestamp())
+            val update = mapOf("status" to JoinRequestStatus.APPROVED.name, "reviewedByUid" to actorUid,
+                "reviewedByName" to actorName, "reviewedAtEpochMs" to now, "assignedWorkerId" to assignedWorkerId,
+                "finalRole" to finalRole.name, "updatedAt" to FieldValue.serverTimestamp())
+            val audit = mapOf("id" to auditId, "companyId" to companyId,
+                "actionType" to AuditActionType.JOIN_REQUEST_APPROVED.name, "actorId" to actorUid,
+                "actorName" to actorName, "actorRole" to MemberRole.DIRECTRICE.name,
+                "detailsFr" to "Adhésion approuvée pour $targetName en qualité de ${finalRole.labelFrench}",
+                "timestampEpochMs" to now, "createdAt" to FieldValue.serverTimestamp())
+            val batch = firestore.batch()
+            batch.update(requestRef, update)
+            batch.update(firestore.collection("users").document(targetUid).collection("join_requests").document(requestId), update)
+            batch.set(firestore.collection("companies").document(companyId).collection("members").document(targetUid), memberPayload)
+            batch.set(firestore.collection("users").document(targetUid).collection("memberships").document(companyId), membershipPayload)
+            batch.set(firestore.collection("companies").document(companyId).collection("audit_logs").document(auditId), audit)
+            batch.commit().await()
 
-            // Update request in Room
-            joinRequestDao.updateStatus(
-                id = requestId,
-                status = JoinRequestStatus.APPROVED.name,
-                reviewerId = actorUid,
-                reviewerName = actorName,
-                reviewedAt = now,
-                workerId = assignedWorkerId
-            )
-
-            // Extract target user details
-            val snapshot = try {
-                firestore.collection("companies").document(companyId)
-                    .collection("join_requests").document(requestId).get().await()
-            } catch (e: Exception) { null }
-
-            val targetUid = snapshot?.getString("userId") ?: requestId.substringAfterLast("_")
-            val targetName = snapshot?.getString("userFullName") ?: "Collaboratrice"
-            val companyName = snapshot?.getString("companyName") ?: "Atelier"
-
-            // 1. Create or activate CompanyMember in Room
-            val member = CompanyMember(
-                companyId = companyId,
-                userId = targetUid,
-                displayName = targetName,
-                role = finalRole,
-                status = MembershipStatus.ACTIVE,
-                companyName = companyName,
-                canPostGroup = (finalRole == MemberRole.DIRECTRICE),
-                canDirectMessage = true,
-                assignedWorkerId = assignedWorkerId,
-                createdAtEpochMs = now
-            )
+            joinRequestDao.updateStatus(requestId, JoinRequestStatus.APPROVED.name, actorUid, actorName, now, assignedWorkerId)
+            val member = CompanyMember(companyId, targetUid, targetName, finalRole, MembershipStatus.ACTIVE,
+                companyName, canPostGroup = false, canDirectMessage = true, assignedWorkerId = assignedWorkerId, createdAtEpochMs = now)
             memberDao.insertOrUpdate(CompanyMemberEntity.fromDomain(member))
-
-            // 2. If no existing worker profile was linked, create a new worker profile
             if (assignedWorkerId == null) {
-                val names = targetName.split(" ")
-                val fName = names.firstOrNull() ?: targetName
-                val lName = names.drop(1).joinToString(" ").ifBlank { "Atelier" }
-                val inits = "${fName.take(1)}${lName.take(1)}".uppercase()
-                val w = WorkerEntity(
-                    id = UUID.randomUUID().toString(),
-                    firstName = fName,
-                    lastName = lName,
-                    initials = inits,
-                    role = if (finalRole == MemberRole.CHAFE) "Superviseuse (Châfa)" else "Couturière",
-                    currentRateMillimes = 3500L,
-                    hireDateIso = java.time.LocalDate.now().toString(),
-                    isActive = true
-                )
-                workerDao.insertOrUpdate(w)
+                val names = targetName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                val first = names.firstOrNull() ?: targetName
+                val last = names.drop(1).joinToString(" ").ifBlank { "Atelier" }
+                workerDao.insertOrUpdate(WorkerEntity(UUID.randomUUID().toString(), first, last,
+                    "${first.take(1)}${last.take(1)}".uppercase(), 3500L,
+                    if (finalRole == MemberRole.CHAFE) "Superviseuse (Châfa)" else "Couturière",
+                    true, java.time.LocalDate.now().toString()))
             }
-
-            // 3. Sync approval and active membership to Firestore
-            try {
-                // Update join request status
-                firestore.collection("companies").document(companyId)
-                    .collection("join_requests").document(requestId)
-                    .update(
-                        "status", "APPROVED",
-                        "reviewedByUid", actorUid,
-                        "reviewedByName", actorName,
-                        "reviewedAtEpochMs", now,
-                        "assignedWorkerId", assignedWorkerId,
-                        "finalRole", finalRole.name,
-                        "updatedAt", FieldValue.serverTimestamp()
-                    ).await()
-
-                // Mirror in user's requests
-                firestore.collection("users").document(targetUid)
-                    .collection("join_requests").document(requestId)
-                    .update(
-                        "status", "APPROVED",
-                        "reviewedByUid", actorUid,
-                        "reviewedByName", actorName,
-                        "reviewedAtEpochMs", now,
-                        "assignedWorkerId", assignedWorkerId,
-                        "finalRole", finalRole.name,
-                        "updatedAt", FieldValue.serverTimestamp()
-                    ).await()
-
-                // Add active membership in company
-                val memberPayload = mapOf(
-                    "id" to member.id,
-                    "companyId" to companyId,
-                    "userId" to targetUid,
-                    "displayName" to targetName,
-                    "role" to finalRole.name,
-                    "status" to "ACTIVE",
-                    "canPostGroup" to member.canPostGroup,
-                    "canDirectMessage" to true,
-                    "assignedWorkerId" to assignedWorkerId,
-                    "createdAtEpochMs" to now,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId)
-                    .collection("members").document(targetUid).set(memberPayload).await()
-
-                // Add active membership in user's directory
-                val userMemPayload = mapOf(
-                    "companyId" to companyId,
-                    "companyName" to companyName,
-                    "role" to finalRole.name,
-                    "status" to "ACTIVE",
-                    "displayName" to targetName,
-                    "assignedWorkerId" to assignedWorkerId,
-                    "createdAtEpochMs" to now,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("users").document(targetUid)
-                    .collection("memberships").document(companyId).set(userMemPayload).await()
-
-                // Audit Event
-                val auditPayload = mapOf(
-                    "id" to UUID.randomUUID().toString(),
-                    "companyId" to companyId,
-                    "actionType" to AuditActionType.JOIN_REQUEST_APPROVED.name,
-                    "actorId" to actorUid,
-                    "actorName" to actorName,
-                    "actorRole" to MemberRole.DIRECTRICE.name,
-                    "detailsFr" to "Adhésion approuvée pour $targetName en qualité de ${finalRole.labelFrench} par $actorName",
-                    "timestampEpochMs" to now,
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId)
-                    .collection("audit_logs").document(auditPayload["id"] as String).set(auditPayload).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore approval sync warning: ${e.message}")
-            }
-
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "approveJoinRequest failed: ${e.message}", e)
+            Log.e(TAG, "approveJoinRequest failed", e)
             Result.failure(e)
         }
     }
 
-    suspend fun refuseJoinRequest(
-        companyId: String,
-        requestId: String,
-        actorName: String,
-        actorUid: String
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
+    suspend fun refuseJoinRequest(companyId: String, requestId: String, actorName: String, actorUid: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            joinRequestDao.updateStatus(
-                id = requestId,
-                status = JoinRequestStatus.REFUSED.name,
-                reviewerId = actorUid,
-                reviewerName = actorName,
-                reviewedAt = now,
-                workerId = null
-            )
-
-            try {
-                firestore.collection("companies").document(companyId)
-                    .collection("join_requests").document(requestId)
-                    .update(
-                        "status", "REFUSED",
-                        "reviewedByUid", actorUid,
-                        "reviewedByName", actorName,
-                        "reviewedAtEpochMs", now,
-                        "updatedAt", FieldValue.serverTimestamp()
-                    ).await()
-
-                val targetUid = requestId.substringAfterLast("_")
-                firestore.collection("users").document(targetUid)
-                    .collection("join_requests").document(requestId)
-                    .update(
-                        "status", "REFUSED",
-                        "reviewedByUid", actorUid,
-                        "reviewedByName", actorName,
-                        "reviewedAtEpochMs", now,
-                        "updatedAt", FieldValue.serverTimestamp()
-                    ).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore refuse sync warning: ${e.message}")
-            }
-
+            val requestRef = firestore.collection("companies").document(companyId).collection("join_requests").document(requestId)
+            val snapshot = requestRef.get().await()
+            check(snapshot.exists()) { "Demande d'adhésion introuvable." }
+            check(snapshot.getString("status") == JoinRequestStatus.PENDING.name) { "Cette demande a déjà été traitée." }
+            val targetUid = snapshot.getString("userId") ?: error("Demande invalide : utilisateur absent.")
+            val now = System.currentTimeMillis()
+            val update = mapOf("status" to JoinRequestStatus.REFUSED.name, "reviewedByUid" to actorUid,
+                "reviewedByName" to actorName, "reviewedAtEpochMs" to now, "updatedAt" to FieldValue.serverTimestamp())
+            val batch = firestore.batch()
+            batch.update(requestRef, update)
+            batch.update(firestore.collection("users").document(targetUid).collection("join_requests").document(requestId), update)
+            batch.commit().await()
+            joinRequestDao.updateStatus(requestId, JoinRequestStatus.REFUSED.name, actorUid, actorName, now, null)
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "refuseJoinRequest failed: ${e.message}", e)
+            Log.e(TAG, "refuseJoinRequest failed", e)
             Result.failure(e)
         }
     }
 
-    suspend fun updateMemberStatus(
-        companyId: String,
-        targetUserId: String,
-        newStatus: MembershipStatus,
-        actorName: String,
-        actorUid: String
-    ): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun updateMemberStatus(companyId: String, targetUserId: String, newStatus: MembershipStatus,
+        actorName: String, actorUid: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            val now = System.currentTimeMillis()
+            val update = mapOf("status" to newStatus.name, "updatedAt" to FieldValue.serverTimestamp())
+            val auditId = UUID.randomUUID().toString()
+            val audit = mapOf("id" to auditId, "companyId" to companyId,
+                "actionType" to (if (newStatus == MembershipStatus.SUSPENDED) AuditActionType.MEMBER_SUSPENDED else AuditActionType.MEMBER_REMOVED).name,
+                "actorId" to actorUid, "actorName" to actorName, "actorRole" to MemberRole.DIRECTRICE.name,
+                "detailsFr" to "Statut du membre $targetUserId changé en ${newStatus.labelFrench}",
+                "timestampEpochMs" to now, "createdAt" to FieldValue.serverTimestamp())
+            val batch = firestore.batch()
+            batch.update(firestore.collection("companies").document(companyId).collection("members").document(targetUserId), update)
+            batch.update(firestore.collection("users").document(targetUserId).collection("memberships").document(companyId), update)
+            batch.set(firestore.collection("companies").document(companyId).collection("audit_logs").document(auditId), audit)
+            batch.commit().await()
             memberDao.updateMemberStatus(companyId, targetUserId, newStatus.name)
-
-            try {
-                firestore.collection("companies").document(companyId)
-                    .collection("members").document(targetUserId)
-                    .update("status", newStatus.name, "updatedAt", FieldValue.serverTimestamp()).await()
-
-                firestore.collection("users").document(targetUserId)
-                    .collection("memberships").document(companyId)
-                    .update("status", newStatus.name, "updatedAt", FieldValue.serverTimestamp()).await()
-
-                val auditPayload = mapOf(
-                    "id" to UUID.randomUUID().toString(),
-                    "companyId" to companyId,
-                    "actionType" to (if (newStatus == MembershipStatus.SUSPENDED) AuditActionType.MEMBER_SUSPENDED else AuditActionType.MEMBER_REMOVED).name,
-                    "actorId" to actorUid,
-                    "actorName" to actorName,
-                    "actorRole" to MemberRole.DIRECTRICE.name,
-                    "detailsFr" to "Statut du membre $targetUserId changé en ${newStatus.labelFrench} par $actorName",
-                    "timestampEpochMs" to System.currentTimeMillis(),
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-                firestore.collection("companies").document(companyId)
-                    .collection("audit_logs").document(auditPayload["id"] as String).set(auditPayload).await()
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore member status update warning: ${e.message}")
-            }
-
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "updateMemberStatus failed: ${e.message}", e)
+            Log.e(TAG, "updateMemberStatus failed", e)
             Result.failure(e)
         }
     }

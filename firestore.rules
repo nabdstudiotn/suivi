@@ -6,6 +6,30 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
+    function companyRef(companyId) {
+      return /databases/$(database)/documents/companies/$(companyId);
+    }
+    function memberRef(companyId, uid) {
+      return /databases/$(database)/documents/companies/$(companyId)/members/$(uid);
+    }
+    function isActiveMember(companyId, uid) {
+      return isAuthenticated() &&
+        exists(memberRef(companyId, uid)) &&
+        get(memberRef(companyId, uid)).data.status == 'ACTIVE';
+    }
+    function isDirectrice(companyId) {
+      return (isActiveMember(companyId, request.auth.uid) &&
+        get(memberRef(companyId, request.auth.uid)).data.role == 'DIRECTRICE') ||
+        (!exists(memberRef(companyId, request.auth.uid)) &&
+         getAfter(memberRef(companyId, request.auth.uid)).data.userId == request.auth.uid &&
+         getAfter(memberRef(companyId, request.auth.uid)).data.status == 'ACTIVE' &&
+         getAfter(memberRef(companyId, request.auth.uid)).data.role == 'DIRECTRICE');
+    }
+    function isCompanyOwner(companyId) {
+      return isAuthenticated() &&
+        ((exists(companyRef(companyId)) && get(companyRef(companyId)).data.ownerId == request.auth.uid) ||
+         (!exists(companyRef(companyId)) && getAfter(companyRef(companyId)).data.ownerId == request.auth.uid));
+    }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
@@ -280,41 +304,77 @@ service cloud.firestore {
 
       match /memberships/{membershipId} {
         allow read: if isOwner(userId);
-        allow create, update: if isAuthenticated();
+        allow create: if (isOwner(userId) &&
+          request.resource.data.companyId is string &&
+          request.resource.data.status == 'ACTIVE' &&
+          request.resource.data.role in ['DIRECTRICE', 'CHAFE', 'OUVRIERE']) ||
+          (request.resource.data.companyId is string && isDirectrice(request.resource.data.companyId));
+        allow update: if (isOwner(userId) &&
+          request.resource.data.companyId == resource.data.companyId &&
+          request.resource.data.userId == userId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.status == resource.data.status) ||
+          (resource.data.companyId is string && isDirectrice(resource.data.companyId));
         allow delete: if isOwner(userId);
       }
 
       match /join_requests/{requestId} {
         allow read: if isOwner(userId);
-        allow create, update: if isAuthenticated();
-        allow delete: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+          request.resource.data.userId == userId &&
+          request.resource.data.status == 'PENDING' &&
+          request.resource.data.requestedRole in ['CHAFE', 'OUVRIERE'];
+        allow update: if (isOwner(userId) &&
+          resource.data.userId == userId &&
+          resource.data.status == 'PENDING' &&
+          request.resource.data.userId == userId &&
+          request.resource.data.companyId == resource.data.companyId &&
+          request.resource.data.status == 'PENDING' &&
+          request.resource.data.requestedRole == resource.data.requestedRole) ||
+          (resource.data.companyId is string && isDirectrice(resource.data.companyId) &&
+           request.resource.data.userId == resource.data.userId &&
+           request.resource.data.companyId == resource.data.companyId &&
+           resource.data.status == 'PENDING' &&
+           request.resource.data.status in ['APPROVED', 'REFUSED']);
+        allow delete: if isOwner(userId) && resource.data.status == 'PENDING';
       }
     }
 
     // --- Companies & Real Communication Isolation ---
     match /companies/{companyId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidCompany(request.resource.data, companyId);
+      allow create: if isAuthenticated() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isValidCompany(request.resource.data, companyId);
+      allow update: if isCompanyOwner(companyId) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        isValidCompany(request.resource.data, companyId);
       allow delete: if false;
 
       match /members/{memberId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidCompanyMember(request.resource.data, companyId, memberId);
-        allow delete: if isAuthenticated() && request.auth.uid == memberId;
+        allow read: if isActiveMember(companyId, request.auth.uid) || request.auth.uid == memberId;
+        allow create: if isCompanyOwner(companyId) &&
+          memberId == request.resource.data.userId &&
+          isValidCompanyMember(request.resource.data, companyId, memberId);
+        allow update: if isDirectrice(companyId) &&
+          request.resource.data.companyId == resource.data.companyId &&
+          request.resource.data.userId == resource.data.userId &&
+          isValidCompanyMember(request.resource.data, companyId, memberId);
+        allow delete: if isDirectrice(companyId) && memberId != request.auth.uid;
       }
 
       match /conversations/{conversationId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidChatConversation(request.resource.data, conversationId, companyId);
+        allow read: if isActiveMember(companyId, request.auth.uid);
+        allow create, update: if isActiveMember(companyId, request.auth.uid) && isValidChatConversation(request.resource.data, conversationId, companyId);
         allow delete: if false;
 
         match /messages/{messageId} {
-          allow read: if isAuthenticated() &&
+          allow read: if isActiveMember(companyId, request.auth.uid) &&
             (resource.data.type == 'GROUP' ||
              resource.data.senderId == request.auth.uid ||
              resource.data.recipientId == request.auth.uid ||
              (('participantUids' in resource.data) && request.auth.uid in resource.data.participantUids));
-          allow create, update: if isAuthenticated() &&
+          allow create, update: if isActiveMember(companyId, request.auth.uid) &&
             request.resource.data.senderId == request.auth.uid &&
             request.resource.data.companyId == companyId &&
             isValidChatMessage(request.resource.data, messageId, conversationId, companyId);
@@ -323,12 +383,12 @@ service cloud.firestore {
       }
 
       match /announcements/{announcementId} {
-        allow read: if isAuthenticated() && resource.data.companyId == companyId;
-        allow create: if isAuthenticated() &&
+        allow read: if isActiveMember(companyId, request.auth.uid) && resource.data.companyId == companyId;
+        allow create: if isDirectrice(companyId) &&
           request.resource.data.companyId == companyId &&
           request.resource.data.authorId == request.auth.uid &&
           isValidWorkshopAnnouncement(request.resource.data, announcementId, companyId);
-        allow update: if isAuthenticated() &&
+        allow update: if isDirectrice(companyId) &&
           request.resource.data.companyId == companyId &&
           (resource.data.authorId == request.auth.uid) &&
           isValidWorkshopAnnouncement(request.resource.data, announcementId, companyId);
@@ -349,8 +409,8 @@ service cloud.firestore {
       }
 
       match /audit_logs/{auditId} {
-        allow read: if isAuthenticated() && resource.data.companyId == companyId;
-        allow create: if isAuthenticated() &&
+        allow read: if isDirectrice(companyId) && resource.data.companyId == companyId;
+        allow create: if isDirectrice(companyId) &&
           request.resource.data.companyId == companyId &&
           request.resource.data.actorId == request.auth.uid &&
           isValidAuditEntry(request.resource.data, companyId);
@@ -358,35 +418,46 @@ service cloud.firestore {
       }
 
       match /sessions/{sessionId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() &&
+        allow read: if isDirectrice(companyId) || (isActiveMember(companyId, request.auth.uid) && resource.data.userId == request.auth.uid);
+        allow create, update: if isActiveMember(companyId, request.auth.uid) &&
+          request.resource.data.userId == request.auth.uid &&
           request.resource.data.companyId == companyId &&
           isValidDeviceSession(request.resource.data, companyId, sessionId);
         allow delete: if false;
       }
 
       match /permissions/{permissionId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() &&
+        allow read: if isActiveMember(companyId, request.auth.uid);
+        allow create, update: if isDirectrice(companyId) &&
           request.resource.data.companyId == companyId &&
           isValidPermissions(request.resource.data, companyId);
         allow delete: if false;
       }
 
       match /month_closures/{yearMonth} {
-        allow read: if isAuthenticated() && resource.data.companyId == companyId;
-        allow create, update: if isAuthenticated() &&
+        allow read: if isActiveMember(companyId, request.auth.uid) && resource.data.companyId == companyId;
+        allow create, update: if isDirectrice(companyId) &&
           request.resource.data.companyId == companyId &&
           isValidMonthClosure(request.resource.data, companyId, yearMonth);
         allow delete: if false;
       }
 
       match /join_requests/{requestId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated();
+        allow read: if isDirectrice(companyId) ||
+          (isAuthenticated() && resource.data.userId == request.auth.uid);
+        allow create: if isAuthenticated() &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.companyId == companyId &&
+          request.resource.data.status == 'PENDING' &&
+          request.resource.data.requestedRole in ['CHAFE', 'OUVRIERE'];
+        allow update: if isDirectrice(companyId) &&
+          resource.data.status == 'PENDING' &&
+          request.resource.data.companyId == companyId &&
+          request.resource.data.userId == resource.data.userId &&
+          request.resource.data.requestedRole == resource.data.requestedRole &&
+          request.resource.data.status in ['APPROVED', 'REFUSED'];
         allow delete: if false;
       }
     }
   }
 }
-
