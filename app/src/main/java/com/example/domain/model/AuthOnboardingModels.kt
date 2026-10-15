@@ -74,6 +74,9 @@ sealed interface AuthGateState {
     // Authenticated in Firebase, resolving memberships in database
     data object ResolvingMembership : AuthGateState
 
+    // Firebase is authenticated but the cloud lookup failed; never crash the launch screen.
+    data class CloudUnavailable(val user: UserAccount, val message: String) : AuthGateState
+
     // Authenticated, but no company and no pending request
     data class NoCompany(val user: UserAccount) : AuthGateState
 

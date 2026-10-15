@@ -558,9 +558,6 @@ class AuthRepository(
         } else {
             flow<AuthGateState> {
                 emit(AuthGateState.ResolvingMembership)
-                // Pull cloud memberships into Room
-                pullUserMembershipsFromCloud(user.uid)
-
                 val uid = user.uid
                 val userAcc = UserAccount(
                     uid = uid,
@@ -568,6 +565,20 @@ class AuthRepository(
                     displayName = user.displayName?.ifBlank { null } ?: user.email?.substringBefore("@") ?: "Utilisateur",
                     phone = user.phoneNumber ?: ""
                 )
+
+                try {
+                    // A Firebase setup or network failure must not crash the Compose launch screen.
+                    pullUserMembershipsFromCloud(uid)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Initial Firebase membership sync failed", e)
+                    emit(
+                        AuthGateState.CloudUnavailable(
+                            user = userAcc,
+                            message = "Impossible de joindre Firebase. Vérifiez la configuration Firebase et votre connexion, puis reconnectez-vous."
+                        )
+                    )
+                    return@flow
+                }
 
                 val membershipsFlow = memberDao.getMembershipsForUser(uid).map { list -> list.map { it.toDomain() } }
                 val joinRequestsFlow = joinRequestDao.getRequestsForUser(uid).map { list -> list.map { it.toDomain() } }

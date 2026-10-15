@@ -107,6 +107,12 @@ fun OnboardingGateScreen(
             is AuthGateState.ResolvingMembership -> {
                 ResolvingMembershipView()
             }
+            is AuthGateState.CloudUnavailable -> {
+                CloudUnavailableView(
+                    message = gateState.message,
+                    onSignOut = { authRepository.signOut() }
+                )
+            }
             is AuthGateState.PendingApproval -> {
                 PendingApprovalView(
                     user = gateState.user,
@@ -859,6 +865,57 @@ private fun JoinCompanyWorkerView(
                     } else {
                         Text("Envoyer ma demande d'adhésion", fontWeight = FontWeight.SemiBold)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CloudUnavailableView(
+    message: String,
+    onSignOut: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = NabdSurfaceWhite),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    tint = NabdRuby,
+                    modifier = Modifier.size(42.dp)
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Connexion Firebase indisponible",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = NabdObsidian,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NabdDeepViolet,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+                OutlinedButton(onClick = onSignOut) {
+                    Icon(Icons.Default.Logout, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Se déconnecter et revenir à l'accueil")
                 }
             }
         }

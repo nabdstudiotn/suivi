@@ -78,8 +78,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val database = SuiviDatabase.getDatabase(applicationContext)
-        val firestoreDbId = getString(R.string.firestore_database_id)
-        val firestore = FirebaseFirestore.getInstance(firestoreDbId)
+        // Resolve the database from the active google-services.json. The old
+        // Firebase Studio database id must not be used in production builds.
+        val firestore = FirebaseFirestore.getInstance()
         val auth = FirebaseAuth.getInstance()
 
         val authRepository = AuthRepository(database, firestore, auth)

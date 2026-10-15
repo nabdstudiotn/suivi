@@ -471,9 +471,16 @@ fun SignInScreen(
                                         val cur = FirebaseAuth.getInstance().currentUser
                                         if (cur != null) {
                                             coroutineScope.launch {
-                                                authRepository.syncUserAccountAndMemberships(cur)
+                                                val syncResult = runCatching {
+                                                    authRepository.syncUserAccountAndMemberships(cur)
+                                                }
                                                 isLoading = false
-                                                onSignInSuccess()
+                                                if (syncResult.isSuccess) {
+                                                    onSignInSuccess()
+                                                } else {
+                                                    FirebaseAuth.getInstance().signOut()
+                                                    errorMessage = "Google a réussi l'authentification, mais Firebase n'est pas correctement configuré pour Suivi."
+                                                }
                                             }
                                         } else {
                                             isLoading = false
@@ -608,6 +615,11 @@ private suspend fun performGoogleSignIn(
     try {
         val credentialManager = CredentialManager.create(context)
         val webClientId = context.getString(R.string.default_web_client_id)
+        if (webClientId.contains("placeholder", ignoreCase = true) ||
+            !webClientId.endsWith(".apps.googleusercontent.com")) {
+            onError("Google n'est pas encore configuré : ajoutez le vrai google-services.json de votre projet Firebase.")
+            return
+        }
 
         val googleOption = GetSignInWithGoogleOption.Builder(webClientId)
             .build()
