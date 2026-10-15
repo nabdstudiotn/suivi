@@ -15,6 +15,7 @@ import com.example.domain.model.JoinRequest
 import com.example.domain.model.MemberRole
 import com.example.domain.model.SettingsTab
 import com.example.domain.model.UserAccountProfile
+import com.example.domain.model.Worker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,6 +35,7 @@ data class SettingsUiState(
     val auditEvents: List<AuditEvent> = emptyList(),
     val filteredAuditEvents: List<AuditEvent> = emptyList(),
     val pendingRequests: List<JoinRequest> = emptyList(),
+    val workerProfiles: List<Worker> = emptyList(),
     val requestToApprove: JoinRequest? = null,
     val companyCode: String = "",
     val selectedAuditCategory: AuditActionCategory = AuditActionCategory.ALL,
@@ -134,6 +136,12 @@ class SettingsViewModel(
                         )
                     )
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.getWorkerProfiles().collectLatest { workers ->
+                _uiState.update { it.copy(workerProfiles = workers) }
             }
         }
 

@@ -7,6 +7,7 @@ import com.example.data.local.ChafaPermissionsEntity
 import com.example.data.local.CompanyProfileEntity
 import com.example.data.local.DeviceSessionEntity
 import com.example.data.local.SuiviDatabase
+import com.example.domain.model.Worker
 import com.example.domain.model.AuditActionType
 import com.example.domain.model.AuditEvent
 import com.example.domain.model.ChafaPermissions
@@ -99,6 +100,10 @@ class SettingsRepository(
 
     fun getCompany(companyId: String): Flow<com.example.domain.model.Company?> =
         database.companyDao().getCompany(companyId).map { it?.toDomain() }.flowOn(Dispatchers.IO)
+
+    /** Active and archived worker profiles available for secure join-request association. */
+    fun getWorkerProfiles(): Flow<List<Worker>> =
+        database.workerDao().getAllWorkers().map { list -> list.map { it.toDomain() } }.flowOn(Dispatchers.IO)
 
     /**
      * Live stream of Châfa permissions configuration.

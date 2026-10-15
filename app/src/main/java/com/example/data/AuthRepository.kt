@@ -424,19 +424,29 @@ class AuthRepository(
             val targetName = snapshot.getString("userFullName") ?: error("Demande invalide : nom absent.")
             val companyName = snapshot.getString("companyName") ?: "Atelier"
             val now = System.currentTimeMillis()
+            val workerId = assignedWorkerId ?: UUID.randomUUID().toString()
+            if (assignedWorkerId != null) {
+                check(workerDao.getWorkerById(assignedWorkerId) != null) {
+                    "Le profil de l'ouvrière sélectionné est introuvable sur cet appareil. Actualisez la liste puis réessayez."
+                }
+            }
+            val names = targetName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+            val firstName = names.firstOrNull() ?: targetName.trim()
+            val lastName = names.drop(1).joinToString(" ").ifBlank { "Atelier" }
+            val workerRole = if (finalRole == MemberRole.CHAFE) "Superviseuse (Châfa)" else "Couturière"
             val auditId = UUID.randomUUID().toString()
             val memberPayload = mapOf(
                 "id" to "${companyId}_$targetUid", "companyId" to companyId, "userId" to targetUid,
                 "displayName" to targetName, "role" to finalRole.name, "status" to MembershipStatus.ACTIVE.name,
-                "canPostGroup" to false, "canDirectMessage" to true, "assignedWorkerId" to assignedWorkerId,
+                "canPostGroup" to false, "canDirectMessage" to true, "assignedWorkerId" to workerId,
                 "createdAt" to FieldValue.serverTimestamp(), "updatedAt" to FieldValue.serverTimestamp())
             val membershipPayload = mapOf(
                 "companyId" to companyId, "companyName" to companyName, "role" to finalRole.name,
                 "status" to MembershipStatus.ACTIVE.name, "displayName" to targetName,
-                "assignedWorkerId" to assignedWorkerId, "createdAtEpochMs" to now,
+                "assignedWorkerId" to workerId, "createdAtEpochMs" to now,
                 "updatedAt" to FieldValue.serverTimestamp())
             val update = mapOf("status" to JoinRequestStatus.APPROVED.name, "reviewedByUid" to actorUid,
-                "reviewedByName" to actorName, "reviewedAtEpochMs" to now, "assignedWorkerId" to assignedWorkerId,
+                "reviewedByName" to actorName, "reviewedAtEpochMs" to now, "assignedWorkerId" to workerId,
                 "finalRole" to finalRole.name, "updatedAt" to FieldValue.serverTimestamp())
             val audit = mapOf("id" to auditId, "companyId" to companyId,
                 "actionType" to AuditActionType.JOIN_REQUEST_APPROVED.name, "actorId" to actorUid,
@@ -449,20 +459,34 @@ class AuthRepository(
             batch.set(firestore.collection("companies").document(companyId).collection("members").document(targetUid), memberPayload)
             batch.set(firestore.collection("users").document(targetUid).collection("memberships").document(companyId), membershipPayload)
             batch.set(firestore.collection("companies").document(companyId).collection("audit_logs").document(auditId), audit)
+            if (assignedWorkerId == null) {
+                batch.set(
+                    firestore.collection("users").document(actorUid).collection("workers").document(workerId),
+                    mapOf(
+                        "id" to workerId,
+                        "userId" to actorUid,
+                        "firstName" to firstName,
+                        "lastName" to lastName,
+                        "initials" to "${firstName.take(1)}${lastName.take(1)}".uppercase(),
+                        "role" to workerRole,
+                        "currentRateMillimes" to 3500L,
+                        "startDateIso" to java.time.LocalDate.now().toString(),
+                        "isActive" to true,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
             batch.commit().await()
 
-            joinRequestDao.updateStatus(requestId, JoinRequestStatus.APPROVED.name, actorUid, actorName, now, assignedWorkerId)
+            joinRequestDao.updateStatus(requestId, JoinRequestStatus.APPROVED.name, actorUid, actorName, now, workerId)
             val member = CompanyMember(companyId, targetUid, targetName, finalRole, MembershipStatus.ACTIVE,
-                companyName, canPostGroup = false, canDirectMessage = true, assignedWorkerId = assignedWorkerId, createdAtEpochMs = now)
+                companyName, canPostGroup = false, canDirectMessage = true, assignedWorkerId = workerId, createdAtEpochMs = now)
             memberDao.insertOrUpdate(CompanyMemberEntity.fromDomain(member))
             if (assignedWorkerId == null) {
-                val names = targetName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-                val first = names.firstOrNull() ?: targetName
-                val last = names.drop(1).joinToString(" ").ifBlank { "Atelier" }
-                workerDao.insertOrUpdate(WorkerEntity(UUID.randomUUID().toString(), first, last,
-                    "${first.take(1)}${last.take(1)}".uppercase(), 3500L,
-                    if (finalRole == MemberRole.CHAFE) "Superviseuse (Châfa)" else "Couturière",
-                    true, java.time.LocalDate.now().toString()))
+                workerDao.insertOrUpdate(WorkerEntity(workerId, firstName, lastName,
+                    "${firstName.take(1)}${lastName.take(1)}".uppercase(), 3500L,
+                    workerRole, true, java.time.LocalDate.now().toString()))
             }
             Result.success(Unit)
         } catch (e: Exception) {

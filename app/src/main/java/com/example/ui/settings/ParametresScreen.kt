@@ -341,7 +341,11 @@ fun ParametresScreen(
     // Join Request Approval Dialog (Real Acceptance Flow)
     if (state.requestToApprove != null) {
         val req = state.requestToApprove!!
-        var assignedRole by remember { mutableStateOf(req.requestedRole) }
+        val suggestedWorkerId = state.workerProfiles.firstOrNull { worker ->
+            worker.fullName.trim().lowercase() == req.userFullName.trim().lowercase()
+        }?.id
+        var assignedRole by remember(req.id) { mutableStateOf(req.requestedRole) }
+        var assignedWorkerId by remember(req.id, suggestedWorkerId) { mutableStateOf(req.assignedWorkerId ?: suggestedWorkerId) }
 
         AlertDialog(
             onDismissRequest = { viewModel.dismissApproveDialog() },
@@ -373,11 +377,70 @@ fun ParametresScreen(
                         RadioButton(selected = assignedRole == MemberRole.CHAFE, onClick = { assignedRole = MemberRole.CHAFE })
                         Text("Châfa (Superviseuse)", style = MaterialTheme.typography.bodySmall)
                     }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = if (suggestedWorkerId != null) "Profil correspondant proposé :" else "Associer à un profil existant :",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { assignedWorkerId = null },
+                        color = if (assignedWorkerId == null) NabdPurple.copy(alpha = 0.12f) else NabdSurfaceSubtle,
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (assignedWorkerId == null) NabdPurple else NabdBorder
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = assignedWorkerId == null, onClick = { assignedWorkerId = null })
+                            Column {
+                                Text("Créer un nouveau profil", fontWeight = FontWeight.SemiBold, color = NabdObsidian)
+                                Text("À partir du nom de la demande", style = MaterialTheme.typography.labelSmall, color = NabdMuted)
+                            }
+                        }
+                    }
+                    state.workerProfiles.forEach { worker ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 5.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { assignedWorkerId = worker.id },
+                            color = if (assignedWorkerId == worker.id) NabdTeal.copy(alpha = 0.10f) else NabdSurfaceSubtle,
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (assignedWorkerId == worker.id) NabdTeal else NabdBorder
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = assignedWorkerId == worker.id,
+                                    onClick = { assignedWorkerId = worker.id }
+                                )
+                                Column {
+                                    Text(worker.fullName, fontWeight = FontWeight.SemiBold, color = NabdObsidian)
+                                    Text(worker.role, style = MaterialTheme.typography.labelSmall, color = NabdMuted)
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.approveJoinRequest(req.id, assignedRole) },
+                    onClick = { viewModel.approveJoinRequest(req.id, assignedRole, assignedWorkerId) },
                     colors = ButtonDefaults.buttonColors(containerColor = NabdPurple),
                     modifier = Modifier.testTag("confirm_approve_join_request")
                 ) {
