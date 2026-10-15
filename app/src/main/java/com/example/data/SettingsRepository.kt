@@ -58,95 +58,23 @@ class SettingsRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        scope.launch {
-            initDefaultSettingsIfEmpty()
-        }
-    }
-
-    /**
-     * Seeds initial default workshop profile, permissions, and device session if database is empty.
-     */
-    private suspend fun initDefaultSettingsIfEmpty() {
-        val defaultCompanyId = "atelier_nabd_01"
-        try {
-            // Initial Company Profile
-            val defaultCompany = CompanyProfile(
-                companyId = defaultCompanyId,
-                name = "Atelier de Confection Nabd",
-                ownerId = "directrice_suivi_01",
-                ownerName = "Directrice Générale",
-                matriculeFiscal = "1458921/A/M/000",
-                address = "Zone Industrielle La Charguia 1, 2035 Tunis",
-                phone = "+216 71 840 220",
-                standardDailyHours = 8,
-                referenceRateMillimes = 3500L,
-                currency = "TND"
-            )
-            companyProfileDao.insertOrUpdate(CompanyProfileEntity.fromDomain(defaultCompany))
-
-            // Initial Châfa Permissions
-            val defaultPermissions = ChafaPermissions(
-                companyId = defaultCompanyId,
-                canEditPastAttendance = false,
-                canRecordAdvances = true,
-                canPublishAnnouncements = false,
-                canViewPayrollFinancials = false,
-                canManageWorkers = false,
-                canViewAuditLogs = true
-            )
-            chafaPermissionsDao.insertOrUpdate(ChafaPermissionsEntity.fromDomain(defaultPermissions))
-
-            // Current Device Session
-            val currentDeviceName = "Tablette Atelier (${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL})"
-            val currentSession = DeviceSession(
-                id = "session_tab_01",
-                companyId = defaultCompanyId,
-                userId = auth.currentUser?.uid ?: "directrice_suivi_01",
-                userName = auth.currentUser?.displayName ?: "Directrice Générale",
-                userRole = MemberRole.DIRECTRICE,
-                deviceName = currentDeviceName,
-                deviceType = "TABLET",
-                ipOrLocation = "Tunis, Tunisie",
-                isCurrentDevice = true,
-                isRevoked = false,
-                lastActiveEpochMs = System.currentTimeMillis()
-            )
-            val supervisorSession = DeviceSession(
-                id = "session_phone_02",
-                companyId = defaultCompanyId,
-                userId = "chafa_workshop_02",
-                userName = "Salma Ben Amor (Châfa)",
-                userRole = MemberRole.CHAFE,
-                deviceName = "Smartphone Châfa (Redmi Note 12)",
-                deviceType = "PHONE",
-                ipOrLocation = "Tunis, Tunisie",
-                isCurrentDevice = false,
-                isRevoked = false,
-                lastActiveEpochMs = System.currentTimeMillis() - 7200000L
-            )
-            sessionDao.insertAll(listOf(
-                DeviceSessionEntity.fromDomain(currentSession),
-                DeviceSessionEntity.fromDomain(supervisorSession)
-            ))
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize default settings: ${e.message}", e)
-        }
+        // Real-time synchronization is driven by active company membership
     }
 
     /**
      * Live stream of authenticated user profile.
      */
-    fun getUserProfile(companyId: String = "atelier_nabd_01"): Flow<UserAccountProfile> = flow {
+    fun getUserProfile(companyId: String): Flow<UserAccountProfile> = flow {
         val user = auth.currentUser
-        val uid = user?.uid ?: "directrice_suivi_01"
+        val uid = user?.uid ?: ""
         val member = memberDao.getMember(companyId, uid)?.toDomain()
 
         val profile = UserAccountProfile(
             userId = uid,
             companyId = companyId,
-            displayName = member?.displayName ?: user?.displayName ?: "Directrice Générale",
-            email = user?.email ?: "direction.nabd@gmail.com",
-            phone = "+216 98 123 456",
+            displayName = member?.displayName ?: user?.displayName?.ifBlank { null } ?: user?.email?.substringBefore("@") ?: "Utilisateur",
+            email = user?.email ?: "",
+            phone = user?.phoneNumber ?: "",
             role = member?.role ?: MemberRole.DIRECTRICE,
             status = member?.status ?: MembershipStatus.ACTIVE,
             lastLoginEpochMs = System.currentTimeMillis()
@@ -157,22 +85,25 @@ class SettingsRepository(
     /**
      * Live stream of workshop company profile, backed by Room and synced with Firestore.
      */
-    fun getCompanyProfile(companyId: String = "atelier_nabd_01"): Flow<CompanyProfile> = flow {
+    fun getCompanyProfile(companyId: String): Flow<CompanyProfile> = flow {
         emitAll(
             companyProfileDao.getCompanyProfile(companyId).map { entity ->
                 entity?.toDomain() ?: CompanyProfile(
                     companyId = companyId,
-                    name = "Atelier de Confection Nabd",
-                    ownerId = "directrice_suivi_01"
+                    name = "Atelier",
+                    ownerId = auth.currentUser?.uid ?: ""
                 )
             }
         )
     }.flowOn(Dispatchers.IO)
 
+    fun getCompany(companyId: String): Flow<com.example.domain.model.Company?> =
+        database.companyDao().getCompany(companyId).map { it?.toDomain() }.flowOn(Dispatchers.IO)
+
     /**
      * Live stream of Châfa permissions configuration.
      */
-    fun getChafaPermissions(companyId: String = "atelier_nabd_01"): Flow<ChafaPermissions> = flow {
+    fun getChafaPermissions(companyId: String): Flow<ChafaPermissions> = flow {
         emitAll(
             chafaPermissionsDao.getPermissions(companyId).map { entity ->
                 entity?.toDomain() ?: ChafaPermissions(companyId = companyId)
@@ -183,7 +114,7 @@ class SettingsRepository(
     /**
      * Live stream of active/historical device sessions.
      */
-    fun getDeviceSessions(companyId: String = "atelier_nabd_01"): Flow<List<DeviceSession>> = flow {
+    fun getDeviceSessions(companyId: String): Flow<List<DeviceSession>> = flow {
         emitAll(
             sessionDao.getSessions(companyId).map { list ->
                 list.map { it.toDomain() }
@@ -194,7 +125,7 @@ class SettingsRepository(
     /**
      * Live stream of all dated audit events, ordered chronologically (newest first).
      */
-    fun getAuditEvents(companyId: String = "atelier_nabd_01"): Flow<List<AuditEvent>> = flow {
+    fun getAuditEvents(companyId: String): Flow<List<AuditEvent>> = flow {
         emitAll(
             auditDao.getAuditEvents(companyId).map { list ->
                 list.map { it.toDomain() }

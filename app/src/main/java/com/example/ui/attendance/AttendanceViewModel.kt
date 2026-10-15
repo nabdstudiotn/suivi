@@ -2,17 +2,25 @@ package com.example.ui.attendance
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ArchiveRepository
 import com.example.data.AttendanceRepository
+import com.example.data.SettingsRepository
 import com.example.domain.calculation.AtelierCalculations
 import com.example.domain.calculation.WorkerPayrollBreakdown
 import com.example.domain.model.AdjustmentType
 import com.example.domain.model.Announcement
+import com.example.domain.model.ArchiveMonthStatus
 import com.example.domain.model.AtelierDate
 import com.example.domain.model.AtelierSection
 import com.example.domain.model.AttendanceEntry
 import com.example.domain.model.AttendanceStatus
 import com.example.domain.model.AttendanceViewMode
+import com.example.domain.model.AuditActionType
+import com.example.domain.model.ChafaPermissions
 import com.example.domain.model.HourlyRateRecord
+import com.example.domain.model.MemberRole
+import com.example.domain.model.MonthClosureRecord
+import com.example.domain.model.UserAccountProfile
 import com.example.domain.model.WorkedMonthSummary
 import com.example.domain.model.Worker
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +61,11 @@ data class AttendanceUiState(
     val currentPayrollMonth: String = AtelierDate.todayTunis().yearMonthIso,
     val workerDraft: com.example.domain.model.WorkerDraft? = null,
     val teamSearchQuery: String = "",
-    val teamFilterStatus: com.example.domain.model.WorkerProfileStatus? = null
+    val teamFilterStatus: com.example.domain.model.WorkerProfileStatus? = null,
+    val currentMonthClosure: MonthClosureRecord? = null,
+    val chafaPermissions: ChafaPermissions? = null,
+    val currentUserProfile: UserAccountProfile? = null,
+    val archiveLockWarning: String? = null
 ) {
     /**
      * Active operators strictly filtered by effective employment period on currentDate.
@@ -119,10 +131,33 @@ data class AttendanceUiState(
         }
         return count
     }
+
+    val isCurrentMonthClosed: Boolean
+        get() = currentMonthClosure?.status == ArchiveMonthStatus.CLOTURE
+
+    val isCurrentMonthInRevision: Boolean
+        get() = currentMonthClosure?.status == ArchiveMonthStatus.EN_REVISION
+
+    val canRecordAdvances: Boolean
+        get() {
+            val role = currentUserProfile?.role ?: MemberRole.DIRECTRICE
+            if (role == MemberRole.DIRECTRICE) return true
+            return chafaPermissions?.canRecordAdvances == true
+        }
+
+    val canViewPayrollFinancials: Boolean
+        get() {
+            val role = currentUserProfile?.role ?: MemberRole.DIRECTRICE
+            if (role == MemberRole.DIRECTRICE) return true
+            return chafaPermissions?.canViewPayrollFinancials == true
+        }
 }
 
 class AttendanceViewModel(
-    private val repository: AttendanceRepository
+    private val repository: AttendanceRepository,
+    private val archiveRepository: ArchiveRepository? = null,
+    private val settingsRepository: SettingsRepository? = null,
+    private val companyId: String
 ) : ViewModel() {
 
     private val today = AtelierDate.todayTunis()
@@ -142,6 +177,20 @@ class AttendanceViewModel(
     init {
         currentInstance = this
 
+        // Observe central permissions and profile from Paramètres
+        if (settingsRepository != null) {
+            viewModelScope.launch {
+                settingsRepository.getChafaPermissions(companyId).collectLatest { perms ->
+                    _uiState.value = _uiState.value.copy(chafaPermissions = perms)
+                }
+            }
+            viewModelScope.launch {
+                settingsRepository.getUserProfile(companyId).collectLatest { profile ->
+                    _uiState.value = _uiState.value.copy(currentUserProfile = profile)
+                }
+            }
+        }
+
         // Collect active workers for attendance list
         viewModelScope.launch {
             repository.getActiveWorkers().collectLatest { workersList ->
@@ -159,6 +208,9 @@ class AttendanceViewModel(
         // Collect attendance for the active date
         observeAttendanceForActiveDate(today)
 
+        // Observe month closure for current date
+        observeMonthClosure(today.yearMonthIso)
+
         // Load workshop archives
         loadWorkshopArchives()
 
@@ -173,6 +225,21 @@ class AttendanceViewModel(
             }
         }
         observeMonthAttendance(date.yearMonthIso)
+        observeMonthClosure(date.yearMonthIso)
+    }
+
+    private fun observeMonthClosure(yearMonth: String) {
+        if (archiveRepository != null) {
+            viewModelScope.launch {
+                archiveRepository.getMonthClosure(companyId, yearMonth).collectLatest { closure ->
+                    _uiState.value = _uiState.value.copy(currentMonthClosure = closure)
+                }
+            }
+        }
+    }
+
+    fun clearArchiveLockWarning() {
+        _uiState.value = _uiState.value.copy(archiveLockWarning = null)
     }
 
     fun setViewMode(mode: AttendanceViewMode) {
@@ -240,10 +307,28 @@ class AttendanceViewModel(
         // Rule: Sunday in Africa/Tunis is automatic rest day, cannot be manually edited into work
         if (date.isSunday) return
 
+        // Archive closure integrity: blocked if month is closed and not in revision
+        if (_uiState.value.currentMonthClosure?.status == ArchiveMonthStatus.CLOTURE) {
+            _uiState.value = _uiState.value.copy(
+                archiveLockWarning = "Le mois ${date.yearMonthIso} est clôturé et certifié dans les archives. Ouvrez une révision officielle dans les Archives pour modifier le pointage."
+            )
+            return
+        }
+
+        // Central permissions: verify past attendance edit rights
+        val role = _uiState.value.currentUserProfile?.role ?: MemberRole.DIRECTRICE
+        if (date < today && role != MemberRole.DIRECTRICE && _uiState.value.chafaPermissions?.canEditPastAttendance == false) {
+            _uiState.value = _uiState.value.copy(
+                archiveLockWarning = "Modification des jours passés non autorisée par les droits de la Directrice (Paramètres)."
+            )
+            return
+        }
+
         _uiState.value = _uiState.value.copy(
             selectedWorkerForEdit = worker,
             targetDateForEdit = date,
-            saveErrorMessage = null
+            saveErrorMessage = null,
+            archiveLockWarning = null
         )
     }
 
@@ -287,6 +372,19 @@ class AttendanceViewModel(
                 )
                 // Real save finished! Advance to next worker in Pointage order
                 moveToNextWorkerOrComplete(worker, date)
+
+                // If modified under official revision, recalculate payroll and audit event
+                if (_uiState.value.isCurrentMonthInRevision) {
+                    loadPayrollForMonth(date.yearMonthIso)
+                    settingsRepository?.logAuditEvent(
+                        companyId = companyId,
+                        actionType = AuditActionType.ARCHIVE_MONTH_REVISED,
+                        detailsFr = "Pointage révisé pour ${worker.fullName} le ${date.isoString} : ${hours}h ${minutes}min (Rev. #${_uiState.value.currentMonthClosure?.revisionCount ?: 1})",
+                        targetEntityId = "${worker.id}_${date.isoString}",
+                        targetEntityName = worker.fullName,
+                        metadata = mapOf("yearMonth" to date.yearMonthIso, "hours" to hours.toString(), "minutes" to minutes.toString())
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     saveErrorMessage = "Impossible d’enregistrer. Réessayez."
@@ -317,6 +415,19 @@ class AttendanceViewModel(
                 )
                 // Real save finished! Advance to next worker in Pointage order
                 moveToNextWorkerOrComplete(worker, date)
+
+                // If modified under official revision, recalculate payroll and audit event
+                if (_uiState.value.isCurrentMonthInRevision) {
+                    loadPayrollForMonth(date.yearMonthIso)
+                    settingsRepository?.logAuditEvent(
+                        companyId = companyId,
+                        actionType = AuditActionType.ARCHIVE_MONTH_REVISED,
+                        detailsFr = "Pointage marqué Absent (AB) sous révision pour ${worker.fullName} le ${date.isoString} (Rev. #${_uiState.value.currentMonthClosure?.revisionCount ?: 1})",
+                        targetEntityId = "${worker.id}_${date.isoString}",
+                        targetEntityName = worker.fullName,
+                        metadata = mapOf("yearMonth" to date.yearMonthIso, "workerId" to worker.id, "status" to "ABSENT")
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     saveErrorMessage = "Impossible d’enregistrer. Réessayez."
@@ -660,6 +771,7 @@ class AttendanceViewModel(
 
     // Payroll methods
     fun loadPayrollForMonth(yearMonth: String) {
+        observeMonthClosure(yearMonth)
         viewModelScope.launch {
             val allWorkers = repository.getAllWorkers().first()
             val monthEntries = repository.getAttendanceForMonth(yearMonth).first()
@@ -698,14 +810,21 @@ class AttendanceViewModel(
     }
 
     fun recordAdvance(workerId: String, amountMillimes: Long, motif: String) {
+        if (!_uiState.value.canRecordAdvances) {
+            _uiState.value = _uiState.value.copy(
+                saveErrorMessage = "Enregistrement des acomptes non autorisé par les droits centraux (Paramètres)."
+            )
+            return
+        }
         viewModelScope.launch {
             val todayIso = AtelierDate.todayTunis().isoString
+            val author = _uiState.value.currentUserProfile?.displayName ?: "Gérante"
             repository.recordAdvance(
                 workerId = workerId,
                 dateIso = todayIso,
                 amountMillimes = amountMillimes,
                 motif = motif,
-                author = "Gérante"
+                author = author
             )
             loadPayrollForMonth(_uiState.value.currentPayrollMonth)
         }
@@ -793,11 +912,16 @@ class AttendanceViewModel(
         @Volatile
         var currentInstance: AttendanceViewModel? = null
 
-        fun provideFactory(repository: AttendanceRepository): androidx.lifecycle.ViewModelProvider.Factory =
+        fun provideFactory(
+            repository: AttendanceRepository,
+            archiveRepository: ArchiveRepository? = null,
+            settingsRepository: SettingsRepository? = null,
+            companyId: String
+        ): androidx.lifecycle.ViewModelProvider.Factory =
             object : androidx.lifecycle.ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                    return AttendanceViewModel(repository) as T
+                    return AttendanceViewModel(repository, archiveRepository, settingsRepository, companyId) as T
                 }
             }
     }

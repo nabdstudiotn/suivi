@@ -30,10 +30,12 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockReset
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Refresh
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tablet
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +62,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -67,6 +71,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -94,6 +101,7 @@ import com.example.ui.theme.NabdMuted
 import com.example.ui.theme.NabdObsidian
 import com.example.ui.theme.NabdPurple
 import com.example.ui.theme.NabdRuby
+import com.example.ui.theme.NabdSurfaceSubtle
 import com.example.ui.theme.NabdSurfaceWhite
 import com.example.ui.theme.NabdTeal
 
@@ -329,6 +337,60 @@ fun ParametresScreen(
             }
         )
     }
+
+    // Join Request Approval Dialog (Real Acceptance Flow)
+    if (state.requestToApprove != null) {
+        val req = state.requestToApprove!!
+        var assignedRole by remember { mutableStateOf(req.requestedRole) }
+
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissApproveDialog() },
+            title = {
+                Text(
+                    text = "Valider l'adhésion à l'atelier",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = NabdObsidian)
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Voulez-vous accepter ${req.userFullName} dans l'équipe de l'atelier ?",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NabdDeepViolet
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(text = "Email : ${req.userEmail}", style = MaterialTheme.typography.bodySmall, color = NabdMuted)
+                    Text(text = "Téléphone : ${req.userPhone}", style = MaterialTheme.typography.bodySmall, color = NabdMuted)
+                    if (!req.note.isNullOrBlank()) {
+                        Text(text = "Note : \"${req.note}\"", style = MaterialTheme.typography.bodySmall, color = NabdDeepViolet)
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(text = "Confirmer le rôle attribué :", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = assignedRole == MemberRole.OUVRIERE, onClick = { assignedRole = MemberRole.OUVRIERE })
+                        Text("Ouvrière", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        RadioButton(selected = assignedRole == MemberRole.CHAFE, onClick = { assignedRole = MemberRole.CHAFE })
+                        Text("Châfa (Superviseuse)", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.approveJoinRequest(req.id, assignedRole) },
+                    colors = ButtonDefaults.buttonColors(containerColor = NabdPurple),
+                    modifier = Modifier.testTag("confirm_approve_join_request")
+                ) {
+                    Text("Approuver l'adhésion")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissApproveDialog() }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -511,6 +573,21 @@ private fun AccountSettingsPanel(
                             Text("Enregistrer les modifications")
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedButton(
+                        onClick = { viewModel.signOut() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("account_sign_out_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NabdRuby)
+                    ) {
+                        Icon(imageVector = Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Se déconnecter de Suivi")
+                    }
                 }
             }
         }
@@ -529,6 +606,184 @@ private fun CompanySettingsPanel(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Atelier Invitation Code Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = NabdSurfaceWhite),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, NabdPurple.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(NabdPurple.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = NabdPurple, modifier = Modifier.size(22.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Code d'invitation de l'atelier",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = NabdObsidian
+                            )
+                            Text(
+                                text = "Partagez ce code avec vos collaboratrices pour rejoindre l'équipe",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NabdMuted
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Surface(
+                        color = NabdPurple.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = state.companyCode.ifBlank { state.companyProfile?.companyId ?: "Atelier" },
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 2.sp,
+                                    color = NabdPurple
+                                )
+                            )
+                            Surface(
+                                color = NabdEmerald.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "Code Actif",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = NabdEmerald,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pending Join Requests Card
+        if (state.pendingRequests.isNotEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = NabdSurfaceWhite),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFD97706)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(NabdGold.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.GroupAdd, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(22.dp))
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Demandes d'adhésion en attente (${state.pendingRequests.size})",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = NabdObsidian
+                                )
+                                Text(
+                                    text = "Examinez et validez les candidatures d'ouvrières et châfas",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = NabdMuted
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        state.pendingRequests.forEach { req ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                color = NabdSurfaceSubtle,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(text = req.userFullName, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = NabdObsidian)
+                                        Surface(
+                                            color = NabdPurple.copy(alpha = 0.12f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = req.requestedRole.labelFrench,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                color = NabdPurple,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = "Tél : ${req.userPhone} • ${req.userEmail}", style = MaterialTheme.typography.bodySmall, color = NabdDeepViolet)
+                                    if (!req.note.isNullOrBlank()) {
+                                        Text(text = "Note : \"${req.note}\"", style = MaterialTheme.typography.bodySmall.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = NabdMuted)
+                                    }
+                                    Text(text = "Reçue le ${req.formattedDateFr}", style = MaterialTheme.typography.labelSmall, color = NabdMuted)
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.refuseJoinRequest(req.id) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NabdRuby)
+                                        ) {
+                                            Text("Refuser")
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Button(
+                                            onClick = { viewModel.openApproveDialog(req) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = NabdPurple)
+                                        ) {
+                                            Text("Approuver")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = NabdSurfaceWhite),

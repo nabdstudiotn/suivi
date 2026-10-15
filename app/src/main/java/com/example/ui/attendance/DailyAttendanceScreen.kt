@@ -230,6 +230,15 @@ fun DailyAttendanceScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
+        // Notice: Monthly Archive Closure or Revision Status
+        if (state.isCurrentMonthClosed && state.viewMode == AttendanceViewMode.JOUR) {
+            ClosedMonthArchiveBanner(state.currentMonthClosure)
+            Spacer(modifier = Modifier.height(8.dp))
+        } else if (state.isCurrentMonthInRevision && state.viewMode == AttendanceViewMode.JOUR) {
+            RevisionMonthArchiveBanner(state.currentMonthClosure)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         // Notice: Sunday Rest Day (Automatique obligatoire)
         if (state.currentDate.isSunday && state.viewMode == AttendanceViewMode.JOUR) {
             SundayNoticeBanner()
@@ -1499,6 +1508,68 @@ private fun PastDateBanner() {
                 text = "Historique enregistré sur cet appareil",
                 fontSize = 11.sp,
                 color = NabdMineralGray,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun ClosedMonthArchiveBanner(closure: com.example.domain.model.MonthClosureRecord?) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFFFBEBEB))
+            .border(1.dp, Color(0xFFE57373), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("closed_month_banner")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = Color(0xFFC0392B),
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = "Mois archivé et clôturé par ${closure?.closedBy ?: "la Direction"} • Modifications verrouillées",
+                fontSize = 11.sp,
+                color = Color(0xFFC0392B),
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun RevisionMonthArchiveBanner(closure: com.example.domain.model.MonthClosureRecord?) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFFFFF8E1))
+            .border(1.dp, Color(0xFFFFB300), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("revision_month_banner")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.History,
+                contentDescription = null,
+                tint = Color(0xFFD97706),
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = "Mois en révision (N°${closure?.revisionCount ?: 1}) : Rectifications tracées dans le registre",
+                fontSize = 11.sp,
+                color = Color(0xFFB45309),
                 fontWeight = FontWeight.Medium
             )
         }

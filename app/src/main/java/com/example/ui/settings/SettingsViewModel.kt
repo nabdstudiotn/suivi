@@ -3,6 +3,7 @@ package com.example.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.AuthRepository
 import com.example.data.SettingsRepository
 import com.example.domain.model.AuditActionCategory
 import com.example.domain.model.AuditDateFilter
@@ -10,6 +11,7 @@ import com.example.domain.model.AuditEvent
 import com.example.domain.model.ChafaPermissions
 import com.example.domain.model.CompanyProfile
 import com.example.domain.model.DeviceSession
+import com.example.domain.model.JoinRequest
 import com.example.domain.model.MemberRole
 import com.example.domain.model.SettingsTab
 import com.example.domain.model.UserAccountProfile
@@ -27,10 +29,13 @@ data class SettingsUiState(
     val selectedTab: SettingsTab = SettingsTab.COMPTE,
     val userProfile: UserAccountProfile? = null,
     val companyProfile: CompanyProfile? = null,
-    val permissions: ChafaPermissions = ChafaPermissions(companyId = "atelier_nabd_01"),
+    val permissions: ChafaPermissions = ChafaPermissions(companyId = ""),
     val sessions: List<DeviceSession> = emptyList(),
     val auditEvents: List<AuditEvent> = emptyList(),
     val filteredAuditEvents: List<AuditEvent> = emptyList(),
+    val pendingRequests: List<JoinRequest> = emptyList(),
+    val requestToApprove: JoinRequest? = null,
+    val companyCode: String = "",
     val selectedAuditCategory: AuditActionCategory = AuditActionCategory.ALL,
     val selectedDateFilter: AuditDateFilter = AuditDateFilter.TOUS,
     val auditSearchQuery: String = "",
@@ -56,7 +61,8 @@ data class SettingsUiState(
 
 class SettingsViewModel(
     private val repository: SettingsRepository,
-    private val companyId: String = "atelier_nabd_01"
+    private val companyId: String,
+    private val authRepository: AuthRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -96,6 +102,14 @@ class SettingsViewModel(
         }
 
         viewModelScope.launch {
+            repository.getCompany(companyId).collectLatest { comp ->
+                if (comp != null) {
+                    _uiState.update { it.copy(companyCode = comp.companyCode) }
+                }
+            }
+        }
+
+        viewModelScope.launch {
             repository.getChafaPermissions(companyId).collectLatest { perms ->
                 _uiState.update { it.copy(permissions = perms) }
             }
@@ -119,6 +133,15 @@ class SettingsViewModel(
                             query = current.auditSearchQuery
                         )
                     )
+                }
+            }
+        }
+
+        if (authRepository != null) {
+            viewModelScope.launch {
+                authRepository.pullPendingRequestsForCompany(companyId)
+                authRepository.getPendingRequestsForCompany(companyId).collectLatest { list ->
+                    _uiState.update { it.copy(pendingRequests = list) }
                 }
             }
         }
@@ -336,13 +359,50 @@ class SettingsViewModel(
         }
     }
 
+    fun openApproveDialog(request: JoinRequest) {
+        _uiState.update { it.copy(requestToApprove = request) }
+    }
+
+    fun dismissApproveDialog() {
+        _uiState.update { it.copy(requestToApprove = null) }
+    }
+
+    fun approveJoinRequest(requestId: String, finalRole: MemberRole, assignedWorkerId: String? = null) {
+        viewModelScope.launch {
+            val actorName = _uiState.value.userProfile?.displayName ?: "Directrice"
+            val actorUid = _uiState.value.userProfile?.userId ?: ""
+            val res = authRepository?.approveJoinRequest(companyId, requestId, finalRole, assignedWorkerId, actorName, actorUid)
+            if (res?.isSuccess == true) {
+                _uiState.update { it.copy(requestToApprove = null, feedbackMessage = "Adhésion approuvée avec succès !", isErrorFeedback = false) }
+            } else {
+                _uiState.update { it.copy(feedbackMessage = "Erreur lors de l'approbation : ${res?.exceptionOrNull()?.message}", isErrorFeedback = true) }
+            }
+        }
+    }
+
+    fun refuseJoinRequest(requestId: String) {
+        viewModelScope.launch {
+            val actorName = _uiState.value.userProfile?.displayName ?: "Directrice"
+            val actorUid = _uiState.value.userProfile?.userId ?: ""
+            val res = authRepository?.refuseJoinRequest(companyId, requestId, actorName, actorUid)
+            if (res?.isSuccess == true) {
+                _uiState.update { it.copy(feedbackMessage = "Demande d'adhésion refusée", isErrorFeedback = false) }
+            }
+        }
+    }
+
+    fun signOut() {
+        authRepository?.signOut()
+    }
+
     class Factory(
         private val repository: SettingsRepository,
-        private val companyId: String = "atelier_nabd_01"
+        private val companyId: String,
+        private val authRepository: AuthRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(repository, companyId) as T
+            return SettingsViewModel(repository, companyId, authRepository) as T
         }
     }
 }

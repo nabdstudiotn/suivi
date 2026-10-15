@@ -121,9 +121,12 @@ data class CompanyMemberEntity(
     val displayName: String,
     val role: String,
     val status: String,
+    val companyName: String = "",
     val canPostGroup: Boolean,
     val canDirectMessage: Boolean,
-    val createdAtIso: String = ""
+    val assignedWorkerId: String? = null,
+    val createdAtIso: String = "",
+    val createdAtEpochMs: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): CompanyMember = CompanyMember(
         id = id,
@@ -132,9 +135,12 @@ data class CompanyMemberEntity(
         displayName = displayName,
         role = MemberRole.fromString(role),
         status = MembershipStatus.fromString(status),
+        companyName = companyName,
         canPostGroup = canPostGroup,
         canDirectMessage = canDirectMessage,
-        createdAtIso = createdAtIso
+        assignedWorkerId = assignedWorkerId,
+        createdAtIso = createdAtIso,
+        createdAtEpochMs = createdAtEpochMs
     )
 
     companion object {
@@ -145,9 +151,12 @@ data class CompanyMemberEntity(
             displayName = m.displayName,
             role = m.role.name,
             status = m.status.name,
+            companyName = m.companyName,
             canPostGroup = m.canPostGroup,
             canDirectMessage = m.canDirectMessage,
-            createdAtIso = m.createdAtIso
+            assignedWorkerId = m.assignedWorkerId,
+            createdAtIso = m.createdAtIso,
+            createdAtEpochMs = m.createdAtEpochMs
         )
     }
 }

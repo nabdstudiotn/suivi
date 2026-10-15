@@ -1,0 +1,52 @@
+[debug] [2026-10-14T21:59:00.560Z] ----------------------------------------------------------------------
+[debug] [2026-10-14T21:59:00.572Z] Command:       /usr/local/bin/node /usr/local/bin/firebase emulators:exec gradle :app:testDebugUnitTest
+[debug] [2026-10-14T21:59:00.572Z] CLI Version:   15.31.0
+[debug] [2026-10-14T21:59:00.572Z] Platform:      linux
+[debug] [2026-10-14T21:59:00.573Z] Node Version:  v22.23.3
+[debug] [2026-10-14T21:59:00.573Z] Detected Agent: unknown
+[debug] [2026-10-14T21:59:00.573Z] Time:          Wed Oct 14 2026 21:59:00 GMT+0000 (Coordinated Universal Time)
+[debug] [2026-10-14T21:59:00.573Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-14T21:59:03.309Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-14T21:59:03.358Z] Running auto auth
+[debug] [2026-10-14T21:59:03.424Z] openjdk version "21.0.12.1" 2026-08-18 LTS
+OpenJDK Runtime Environment Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS)
+
+[debug] [2026-10-14T21:59:03.424Z] OpenJDK 64-Bit Server VM Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS, mixed mode, sharing)
+
+[debug] [2026-10-14T21:59:03.430Z] Parsed Java major version: 21
+[info] i  emulators: Starting emulators: auth, firestore {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: auth, firestore"}}
+[info] i  emulators: Detected demo project ID "demo-no-project", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail. {"metadata":{"emulator":{"name":"hub"},"message":"Detected demo project ID \"demo-no-project\", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail."}}
+[debug] [2026-10-14T21:59:03.445Z] [logging] Logging Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-10-14T21:59:03.445Z] assigned listening specs for emulators {"user":{"auth":[{"address":"127.0.0.1","family":"IPv4","port":9099}],"firestore":[{"address":"127.0.0.1","family":"IPv4","port":8085}],"firestore.websocket":[{"address":"127.0.0.1","family":"IPv4","port":9150}],"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-10-14T21:59:03.449Z] Write emulator hub locator at /tmp/hub-demo-no-project.json
+[debug] [2026-10-14T21:59:03.455Z] Ignoring unsupported arg: auto_download {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: auto_download"}}
+[debug] [2026-10-14T21:59:03.455Z] Ignoring unsupported arg: single_project_mode_error {"metadata":{"emulator":{"name":"firestore"},"message":"Ignoring unsupported arg: single_project_mode_error"}}
+[debug] [2026-10-14T21:59:03.455Z] Starting Firestore Emulator with command {"binary":"java","args":["-Dgoogle.cloud_firestore.debug_log_level=FINE","-Duser.language=en","-jar","/opt/firebase-emulators/cloud-firestore-emulator-v1.22.0.jar","--host","127.0.0.1","--port",8085,"--websocket_port",9150,"--database-edition","standard","--project_id","demo-no-project","--rules","/app/applet/firestore.rules","--single_project_mode",true],"optionalArgs":["port","webchannel_port","host","rules","websocket_port","database-edition","functions_emulator","seed_from_export","project_id","single_project_mode"],"joinArgs":false,"shell":false,"port":8085} {"metadata":{"emulator":{"name":"firestore"},"message":"Starting Firestore Emulator with command {\"binary\":\"java\",\"args\":[\"-Dgoogle.cloud_firestore.debug_log_level=FINE\",\"-Duser.language=en\",\"-jar\",\"/opt/firebase-emulators/cloud-firestore-emulator-v1.22.0.jar\",\"--host\",\"127.0.0.1\",\"--port\",8085,\"--websocket_port\",9150,\"--database-edition\",\"standard\",\"--project_id\",\"demo-no-project\",\"--rules\",\"/app/applet/firestore.rules\",\"--single_project_mode\",true],\"optionalArgs\":[\"port\",\"webchannel_port\",\"host\",\"rules\",\"websocket_port\",\"database-edition\",\"functions_emulator\",\"seed_from_export\",\"project_id\",\"single_project_mode\"],\"joinArgs\":false,\"shell\":false,\"port\":8085}"}}
+[info] i  firestore: Firestore Emulator logging to firestore-debug.log {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator logging to firestore-debug.log"}}
+[debug] [2026-10-14T21:59:05.658Z] Oct 14, 2026 9:59:05 PM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketServer start
+INFO: Started WebSocket server on ws://127.0.0.1:9150
+ {"metadata":{"emulator":{"name":"firestore"},"message":"Oct 14, 2026 9:59:05 PM com.google.cloud.datastore.emulator.firestore.websocket.WebSocketServer start\nINFO: Started WebSocket server on ws://127.0.0.1:9150\n"}}
+[debug] [2026-10-14T21:59:05.701Z] 
+API endpoint: http:// {"metadata":{"emulator":{"name":"firestore"},"message":"\nAPI endpoint: http://"}}
+[debug] [2026-10-14T21:59:05.702Z] 127.0.0.1:8085
+Database Edition: STANDARD
+Database Mode: CLOUD_FIRESTORE
+
+If you are using a library that supports the FIRESTORE_EMULATOR_HOST environment variable, run:
+
+   export FIRESTORE_EMULATOR_HOST=127.0.0.1:8085
+
+If you are running a Firestore in Datastore Mode project, run:
+
+   export DATASTORE_EMULATOR_HOST=127.0.0.1:8085
+
+Note: Support for Datastore Mode is in preview. If you encounter any bugs please file at https://github.com/firebase/firebase-tools/issues.
+Dev App Server is now running.
+
+ {"metadata":{"emulator":{"name":"firestore"},"message":"127.0.0.1:8085\nDatabase Edition: STANDARD\nDatabase Mode: CLOUD_FIRESTORE\n\nIf you are using a library that supports the FIRESTORE_EMULATOR_HOST environment variable, run:\n\n   export FIRESTORE_EMULATOR_HOST=127.0.0.1:8085\n\nIf you are running a Firestore in Datastore Mode project, run:\n\n   export DATASTORE_EMULATOR_HOST=127.0.0.1:8085\n\nNote: Support for Datastore Mode is in preview. If you encounter any bugs please file at https://github.com/firebase/firebase-tools/issues.\nDev App Server is now running.\n\n"}}
+[info] ✔  firestore: Firestore Emulator was started in standard edition. {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator was started in standard edition."}}
+[info] ✔  firestore: Firestore Emulator UI websocket is running on 9150. {"metadata":{"emulator":{"name":"firestore"},"message":"Firestore Emulator UI websocket is running on 9150."}}
+[debug] [2026-10-14T21:59:14.501Z] Could not find VSCode notification endpoint: TypeError: fetch failed. If you are not running the Firebase SQL Connect VSCode extension, this is expected and not an issue.
+[info] i  Running script: gradle :app:testDebugUnitTest 
+[debug] [2026-10-14T21:59:14.506Z] Running gradle :app:testDebugUnitTest with environment {"GOOGLE_RUNTIME":"nodejs22","FIREBASE_EMULATORS_PATH":"/opt/firebase-emulators","LANGUAGE":"en_US:en","NO_UPDATE_NOTIFIER":"true","NODE_VERSION":"22.23.3","CONTROL_PLANE_PORT":"8000","APP_URL":"https://ais-dev-wqh2u5vtick46o7cj4an2d-529425814817.europe-west3.run.app","K_REVISION":"ais-dev-wqh2u5vtick46o7cj4an2d-00002-w4c","YARN_VERSION":"1.22.22","DEFAULT_APP_PORT":"3000","SHLVL":"0","HOME":"/root","PORT":"8080","NODE_OPTIONS":"--max-old-space-size=4096","NG_ALLOWED_HOSTS":"ais-dev-wqh2u5vtick46o7cj4an2d-529425814817.europe-west3.run.app","CLOUD_RUN_TIMEOUT_SECONDS":"3600","APPLET_ID":"c8ece378-6e72-439d-b146-75af2441c473","K_CONFIGURATION":"ais-dev-wqh2u5vtick46o7cj4an2d","_":"/app/control-plane-api/control-plane-api","APPLET_DIR":"applet","CONTROL_PLANE_API_DIR":"control-plane-api","GOMEMLIMIT":"512MiB","PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/android/sdk/cmdline-tools/latest/bin:/opt/android/sdk/platform-tools:/opt/gradle/gradle-9.3.1/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","NEXT_TELEMETRY_DISABLED":"","CNB_GROUP_ID":"33","CNB_USER_ID":"33","APP_DIR":"/app/applet","AI_STUDIO_AGENT":"1","LANG":"en_US.UTF-8","DEBIAN_FRONTEND":"noninteractive","NODE_PATH":"/usr/local/lib/node_modules","K_SERVICE":"ais-dev-wqh2u5vtick46o7cj4an2d","GRADLE_VERSION":"9.3.1","NGINX_PORT":"8080","ANDROID_SDK_ROOT":"/opt/android/sdk","LC_ALL":"en_US.UTF-8","PWD":"/app/applet","GRADLE_USER_HOME":"/opt/gradle/.gradle","ANDROID_FRAMEWORK":"true","GEMINI_API_KEY":"AQ.Ab8RN6JRMLIdkJ5mGZuV3zKuIcK25f2DXlj23f6SQDPkjecyfA","AUTHORIZED_SERVICE_ACCOUNT_EMAIL":"ais-sandbox@ais-europe-west3-d46c8781d36f4.iam.gserviceaccount.com","CSP_HEADER_VALUE":"frame-ancestors 'self' https://*.google.com https://localhost.corp.google.com:26001;","NODE_ENV":"development","CNB_STACK_ID":"google.gae.22","IS_FIREBASE_CLI":"true","FIREBASE_EMULATOR_HUB":"127.0.0.1:4400","FIREBASE_AUTH_EMULATOR_HOST":"127.0.0.1:9099","FIRESTORE_EMULATOR_HOST":"127.0.0.1:8085","FIREBASE_FIRESTORE_EMULATOR_ADDRESS":"127.0.0.1:8085"}

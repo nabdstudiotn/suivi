@@ -32,11 +32,18 @@ enum class MemberRole(val labelFrench: String, val descriptionFr: String) {
  */
 enum class MembershipStatus(val labelFrench: String) {
     ACTIVE("Actif"),
-    SUSPENDED("Suspendu");
+    PENDING("En attente de validation"),
+    SUSPENDED("Accès suspendu"),
+    REMOVED("Accès révoqué");
 
     companion object {
         fun fromString(status: String?): MembershipStatus {
-            return if (status?.uppercase(Locale.US)?.trim() == "SUSPENDED") SUSPENDED else ACTIVE
+            return when (status?.uppercase(Locale.US)?.trim()) {
+                "PENDING" -> PENDING
+                "SUSPENDED" -> SUSPENDED
+                "REMOVED" -> REMOVED
+                else -> ACTIVE
+            }
         }
     }
 }
@@ -48,7 +55,11 @@ data class Company(
     val id: String,
     val name: String,
     val ownerId: String,
-    val createdAtIso: String = ""
+    val ownerName: String = "",
+    val phone: String = "",
+    val companyCode: String = "",
+    val createdAtIso: String = "",
+    val createdAtEpochMs: Long = System.currentTimeMillis()
 )
 
 /**
@@ -60,9 +71,12 @@ data class CompanyMember(
     val displayName: String,
     val role: MemberRole,
     val status: MembershipStatus = MembershipStatus.ACTIVE,
+    val companyName: String = "",
     val canPostGroup: Boolean = (role == MemberRole.DIRECTRICE),
     val canDirectMessage: Boolean = true,
+    val assignedWorkerId: String? = null,
     val createdAtIso: String = "",
+    val createdAtEpochMs: Long = System.currentTimeMillis(),
     val id: String = "${companyId}_${userId}"
 ) {
     val isActive: Boolean

@@ -20,12 +20,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -60,6 +65,8 @@ import com.example.domain.calculation.PayrollAuditGrade
 import com.example.domain.calculation.PayrollEligibilityStatus
 import com.example.domain.calculation.WorkerPayrollBreakdown
 import com.example.domain.model.AdjustmentType
+import com.example.domain.model.ArchiveMonthStatus
+import com.example.domain.model.MonthClosureRecord
 import com.example.domain.model.Worker
 import com.example.domain.model.formatMillimesAsTnd
 import com.example.ui.theme.NabdBone
@@ -77,6 +84,10 @@ import com.example.ui.theme.NabdPurple
 import com.example.ui.theme.NabdSurfaceSubtle
 import com.example.ui.theme.NabdSurfaceWhite
 import kotlinx.coroutines.delay
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Section 3: Paie (Calcul déterministe et enregistrement des paiements).
@@ -99,6 +110,10 @@ fun PayrollScreen(
     onRecordAdvance: (workerId: String, amountMillimes: Long, motif: String) -> Unit,
     onRecordAdjustment: (type: AdjustmentType, workerId: String, amountMillimes: Long, motif: String, note: String?) -> Unit,
     onRecordPayment: (workerId: String, amountMillimes: Long, method: String, note: String?) -> Unit,
+    monthClosure: MonthClosureRecord? = null,
+    canRecordAdvances: Boolean = true,
+    canViewPayrollFinancials: Boolean = true,
+    onNavigateToArchives: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Only ONE worker can have revealed calculation at a time. None revealed by default.
@@ -107,6 +122,7 @@ fun PayrollScreen(
 
     // Dialog state for worker selection via Eye button
     var showEyeWorkerPicker by remember { mutableStateOf(false) }
+    var showPermissionDeniedDialog by remember { mutableStateOf<String?>(null) }
 
     // Dialogs for financial operations
     var workerForAdvance by remember { mutableStateOf<Worker?>(null) }
@@ -201,7 +217,9 @@ fun PayrollScreen(
 
                 IconButton(
                     onClick = {
-                        if (revealedWorkerId != null) {
+                        if (!canViewPayrollFinancials) {
+                            showPermissionDeniedDialog = "Consultation des montants financiers non autorisée par la Directrice dans les Paramètres."
+                        } else if (revealedWorkerId != null) {
                             // Mask immediately on click
                             revealedWorkerId = null
                         } else {
@@ -226,6 +244,15 @@ fun PayrollScreen(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Prestations & Monthly Archive Status Card
+        PrestationsArchiveLinkBanner(
+            currentMonthIso = currentMonthIso,
+            monthClosure = monthClosure,
+            onNavigateToArchives = onNavigateToArchives
+        )
 
         // Active Reveal Banner notice if worker revealed
         if (revealedWorkerId != null) {
@@ -323,13 +350,21 @@ fun PayrollScreen(
                         breakdown = breakdown,
                         isRevealed = isRevealed,
                         onRevealClicked = {
-                            if (revealedWorkerId == worker.id) {
+                            if (!canViewPayrollFinancials) {
+                                showPermissionDeniedDialog = "Consultation des montants financiers non autorisée par la Directrice dans les Paramètres."
+                            } else if (revealedWorkerId == worker.id) {
                                 revealedWorkerId = null
                             } else {
                                 revealedWorkerId = worker.id
                             }
                         },
-                        onAddAdvance = { workerForAdvance = worker },
+                        onAddAdvance = {
+                            if (!canRecordAdvances) {
+                                showPermissionDeniedDialog = "Enregistrement des acomptes non autorisé par la Directrice dans les Paramètres."
+                            } else {
+                                workerForAdvance = worker
+                            }
+                        },
                         onAddAdjustment = { workerForAdjustment = worker },
                         onAddPayment = {
                             if (breakdown?.isGrade3Blocked == true) {
@@ -526,7 +561,159 @@ fun PayrollScreen(
             }
         )
     }
+
+    // Modal: Permission Denied notice
+    showPermissionDeniedDialog?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { showPermissionDeniedDialog = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Autorisation",
+                        tint = NabdCoralText,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Action restreinte", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NabdObsidian
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showPermissionDeniedDialog = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = NabdPurple)
+                ) {
+                    Text("Compris")
+                }
+            }
+        )
+    }
 }
+
+@Composable
+private fun PrestationsArchiveLinkBanner(
+    currentMonthIso: String,
+    monthClosure: MonthClosureRecord?,
+    onNavigateToArchives: () -> Unit
+) {
+    val status = monthClosure?.status ?: ArchiveMonthStatus.OUVERT
+    val (bgColor, borderColor, textColor, icon, title, desc) = when (status) {
+        ArchiveMonthStatus.CLOTURE -> {
+            val dateStr = try {
+                val instant = Instant.ofEpochMilli(monthClosure?.closedAtEpochMs ?: System.currentTimeMillis())
+                DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", Locale.FRENCH).withZone(ZoneId.of("Africa/Tunis")).format(instant)
+            } catch (e: Exception) { "" }
+            HexQuad(
+                Color(0xFFE8F5E9),
+                Color(0xFF2E7D32),
+                Color(0xFF1B5E20),
+                Icons.Default.Lock,
+                "Prestations Clôturées & Certifiées",
+                "Archive $currentMonthIso certifiée le $dateStr par ${monthClosure?.closedBy ?: "Directrice"} (${monthClosure?.closedByRole?.labelFrench ?: "Directrice"}). Calculs scellés et conformes."
+            )
+        }
+        ArchiveMonthStatus.EN_REVISION -> {
+            HexQuad(
+                Color(0xFFFFF3E0),
+                Color(0xFFE65100),
+                Color(0xFFBF360C),
+                Icons.Default.History,
+                "Prestations en Révision Officielle (Rev. #${monthClosure?.revisionCount ?: 1})",
+                "Motif : ${monthClosure?.revisionReason ?: "Correction d'heures"}. Les prestations s'ajustent en direct au pointage révisé sous audit."
+            )
+        }
+        ArchiveMonthStatus.OUVERT -> {
+            HexQuad(
+                NabdPurple.copy(alpha = 0.08f),
+                NabdPurple.copy(alpha = 0.25f),
+                NabdDeepViolet,
+                Icons.Default.Schedule,
+                "Calcul des Prestations en Cours (Pointage Ouvert)",
+                "Calcul déterministe en direct d'après les heures et pointages confirmés pour le mois $currentMonthIso."
+            )
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = bgColor,
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor.copy(alpha = 0.6f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("prestations_archive_banner")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(borderColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = borderColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NabdObsidian.copy(alpha = 0.85f),
+                    lineHeight = 16.sp
+                )
+            }
+
+            OutlinedButton(
+                onClick = onNavigateToArchives,
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, borderColor.copy(alpha = 0.5f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = textColor),
+                modifier = Modifier.testTag("btn_view_archive_from_payroll")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Archive,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Archive", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private data class HexQuad(
+    val bg: Color,
+    val border: Color,
+    val text: Color,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val title: String,
+    val desc: String
+)
 
 @Composable
 private fun WorkerPayrollCard(

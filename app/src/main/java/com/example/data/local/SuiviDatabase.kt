@@ -28,9 +28,12 @@ import androidx.room.RoomDatabase
         CompanyProfileEntity::class,
         ChafaPermissionsEntity::class,
         DeviceSessionEntity::class,
-        MonthClosureEntity::class
+        MonthClosureEntity::class,
+        CompanyEntity::class,
+        JoinRequestEntity::class,
+        UserAccountEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class SuiviDatabase : RoomDatabase() {
@@ -52,6 +55,9 @@ abstract class SuiviDatabase : RoomDatabase() {
     abstract fun chafaPermissionsDao(): ChafaPermissionsDao
     abstract fun deviceSessionDao(): DeviceSessionDao
     abstract fun monthClosureDao(): MonthClosureDao
+    abstract fun companyDao(): CompanyDao
+    abstract fun joinRequestDao(): JoinRequestDao
+    abstract fun userAccountDao(): UserAccountDao
 
     companion object {
         @Volatile

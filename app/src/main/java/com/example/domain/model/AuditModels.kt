@@ -40,9 +40,15 @@ enum class AuditActionType(val category: AuditActionCategory, val labelFr: Strin
     ANNOUNCEMENT_CANCELLED(AuditActionCategory.COMMUNICATION, "Annonce annulée"),
     MESSAGE_SENT(AuditActionCategory.COMMUNICATION, "Message envoyé"),
 
+    COMPANY_CREATED(AuditActionCategory.PARAMETRES, "Espace entreprise créé"),
     COMPANY_UPDATED(AuditActionCategory.PARAMETRES, "Profil d'atelier mis à jour"),
     USER_PROFILE_UPDATED(AuditActionCategory.PARAMETRES, "Profil utilisateur mis à jour"),
     PERMISSION_CHANGED(AuditActionCategory.PARAMETRES, "Permissions & droits modifiés"),
+    JOIN_REQUEST_SUBMITTED(AuditActionCategory.PARAMETRES, "Demande d'adhésion soumise"),
+    JOIN_REQUEST_APPROVED(AuditActionCategory.PARAMETRES, "Demande d'adhésion approuvée"),
+    JOIN_REQUEST_REFUSED(AuditActionCategory.PARAMETRES, "Demande d'adhésion refusée"),
+    MEMBER_SUSPENDED(AuditActionCategory.PARAMETRES, "Membre d'atelier suspendu"),
+    MEMBER_REMOVED(AuditActionCategory.PARAMETRES, "Accès membre révoqué"),
 
     SESSION_CREATED(AuditActionCategory.SECURITE, "Nouvelle session / appareil"),
     SESSION_REVOKED(AuditActionCategory.SECURITE, "Session d'appareil révoquée"),

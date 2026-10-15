@@ -277,6 +277,18 @@ service cloud.firestore {
         allow create, update: if isOwner(userId) && isValidAnnouncement(request.resource.data, userId);
         allow delete: if isOwner(userId);
       }
+
+      match /memberships/{membershipId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isAuthenticated();
+        allow delete: if isOwner(userId);
+      }
+
+      match /join_requests/{requestId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isAuthenticated();
+        allow delete: if isOwner(userId);
+      }
     }
 
     // --- Companies & Real Communication Isolation ---
@@ -366,6 +378,12 @@ service cloud.firestore {
         allow create, update: if isAuthenticated() &&
           request.resource.data.companyId == companyId &&
           isValidMonthClosure(request.resource.data, companyId, yearMonth);
+        allow delete: if false;
+      }
+
+      match /join_requests/{requestId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated();
         allow delete: if false;
       }
     }

@@ -85,7 +85,7 @@ class ArchivesViewModel(
     private val archiveRepository: ArchiveRepository,
     private val settingsRepository: SettingsRepository,
     private val attendanceRepository: AttendanceRepository,
-    private val companyId: String = "atelier_nabd_01"
+    private val companyId: String
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ArchivesUiState())
@@ -365,7 +365,7 @@ class ArchivesViewModel(
         private val archiveRepository: ArchiveRepository,
         private val settingsRepository: SettingsRepository,
         private val attendanceRepository: AttendanceRepository,
-        private val companyId: String = "atelier_nabd_01"
+        private val companyId: String
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

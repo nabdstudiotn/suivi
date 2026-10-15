@@ -25,10 +25,10 @@ import kotlinx.coroutines.launch
 
 data class CommunicationUiState(
     val selectedTab: Int = 0, // 0: Discussions (Group), 1: Messages privés (Direct)
-    val companyId: String = "atelier_nabd_01",
+    val companyId: String = "",
     val currentMember: CompanyMember? = null,
     val isLoading: Boolean = false,
-    val groupConversationId: String = buildGroupConversationId("atelier_nabd_01"),
+    val groupConversationId: String = "",
     val groupMessages: List<ChatMessage> = emptyList(),
     val companyMembers: List<CompanyMember> = emptyList(),
     val directConversations: List<ChatConversation> = emptyList(),
@@ -56,7 +56,7 @@ data class CommunicationUiState(
 
 class CommunicationViewModel(
     private val repository: CommunicationRepository,
-    private val companyId: String = "atelier_nabd_01"
+    private val companyId: String
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -396,7 +396,7 @@ class CommunicationViewModel(
 
     class Factory(
         private val repository: CommunicationRepository,
-        private val companyId: String = "atelier_nabd_01"
+        private val companyId: String
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

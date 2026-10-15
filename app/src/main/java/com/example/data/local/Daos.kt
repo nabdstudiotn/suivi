@@ -152,6 +152,12 @@ interface CompanyMemberDao {
     @Query("SELECT * FROM company_members WHERE companyId = :companyId AND status = 'ACTIVE' ORDER BY displayName ASC")
     fun getActiveMembersForCompany(companyId: String): Flow<List<CompanyMemberEntity>>
 
+    @Query("SELECT * FROM company_members WHERE userId = :userId ORDER BY createdAtEpochMs DESC")
+    fun getMembershipsForUser(userId: String): Flow<List<CompanyMemberEntity>>
+
+    @Query("SELECT * FROM company_members WHERE userId = :userId AND status = 'ACTIVE' ORDER BY createdAtEpochMs DESC")
+    fun getActiveMembershipsForUser(userId: String): Flow<List<CompanyMemberEntity>>
+
     @Query("SELECT * FROM company_members WHERE companyId = :companyId AND userId = :userId")
     suspend fun getMember(companyId: String, userId: String): CompanyMemberEntity?
 
@@ -160,6 +166,63 @@ interface CompanyMemberDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMembers(members: List<CompanyMemberEntity>)
+
+    @Query("UPDATE company_members SET status = :status WHERE companyId = :companyId AND userId = :userId")
+    suspend fun updateMemberStatus(companyId: String, userId: String, status: String)
+
+    @Query("DELETE FROM company_members WHERE companyId = :companyId AND userId = :userId")
+    suspend fun deleteMember(companyId: String, userId: String)
+}
+
+@Dao
+interface CompanyDao {
+    @Query("SELECT * FROM companies WHERE id = :id LIMIT 1")
+    fun getCompany(id: String): Flow<CompanyEntity?>
+
+    @Query("SELECT * FROM companies ORDER BY name ASC")
+    fun getAllCompanies(): Flow<List<CompanyEntity>>
+
+    @Query("SELECT * FROM companies WHERE companyCode = :code LIMIT 1")
+    suspend fun getCompanyByCode(code: String): CompanyEntity?
+
+    @Query("SELECT * FROM companies WHERE name LIKE '%' || :query || '%' OR phone LIKE '%' || :query || '%' OR companyCode LIKE '%' || :query || '%'")
+    fun searchCompanies(query: String): Flow<List<CompanyEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(company: CompanyEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(companies: List<CompanyEntity>)
+}
+
+@Dao
+interface JoinRequestDao {
+    @Query("SELECT * FROM join_requests WHERE companyId = :companyId ORDER BY createdAtEpochMs DESC")
+    fun getRequestsForCompany(companyId: String): Flow<List<JoinRequestEntity>>
+
+    @Query("SELECT * FROM join_requests WHERE companyId = :companyId AND status = 'PENDING' ORDER BY createdAtEpochMs DESC")
+    fun getPendingRequestsForCompany(companyId: String): Flow<List<JoinRequestEntity>>
+
+    @Query("SELECT * FROM join_requests WHERE userId = :userId ORDER BY createdAtEpochMs DESC")
+    fun getRequestsForUser(userId: String): Flow<List<JoinRequestEntity>>
+
+    @Query("SELECT * FROM join_requests WHERE id = :id LIMIT 1")
+    fun getRequestById(id: String): Flow<JoinRequestEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(request: JoinRequestEntity)
+
+    @Query("UPDATE join_requests SET status = :status, reviewedByUid = :reviewerId, reviewedByName = :reviewerName, reviewedAtEpochMs = :reviewedAt, assignedWorkerId = :workerId WHERE id = :id")
+    suspend fun updateStatus(id: String, status: String, reviewerId: String, reviewerName: String, reviewedAt: Long, workerId: String?)
+}
+
+@Dao
+interface UserAccountDao {
+    @Query("SELECT * FROM user_accounts WHERE uid = :uid LIMIT 1")
+    fun getUserAccount(uid: String): Flow<UserAccountEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(user: UserAccountEntity)
 }
 
 @Dao

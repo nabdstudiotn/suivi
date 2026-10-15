@@ -32,17 +32,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.data.ArchiveRepository
+import com.example.data.AuthRepository
 import com.example.data.CommunicationRepository
 import com.example.data.RoomAttendanceRepository
 import com.example.data.SettingsRepository
 import com.example.data.local.SuiviDatabase
 import com.example.domain.model.AtelierSection
+import com.example.domain.model.AuthGateState
+import com.example.domain.model.CompanyMember
 import com.example.ui.archives.ArchivesScreen
 import com.example.ui.archives.ArchivesViewModel
 import com.example.ui.attendance.AttendanceViewModel
 import com.example.ui.attendance.DailyAttendanceScreen
 import com.example.ui.attendance.TimeEntryWheelDialog
+import com.example.ui.auth.OnboardingGateScreen
 import com.example.ui.auth.SignInScreen
 import com.example.ui.communication.CommunicationScreen
 import com.example.ui.communication.CommunicationViewModel
@@ -75,6 +82,7 @@ class MainActivity : ComponentActivity() {
         val firestore = FirebaseFirestore.getInstance(firestoreDbId)
         val auth = FirebaseAuth.getInstance()
 
+        val authRepository = AuthRepository(database, firestore, auth)
         val attendanceRepository = RoomAttendanceRepository(database)
         val communicationRepository = CommunicationRepository(database, firestore, auth)
         val settingsRepository = SettingsRepository(database, firestore, auth)
@@ -90,48 +98,89 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SuiviTheme {
-                var currentUser by remember { mutableStateOf(auth.currentUser) }
+                val gateState by authRepository.observeAuthGateState().collectAsState(initial = AuthGateState.ResolvingMembership)
+                var selectedCompanyMember by remember { mutableStateOf<CompanyMember?>(null) }
 
-                DisposableEffect(Unit) {
-                    val listener = FirebaseAuth.AuthStateListener {
-                        currentUser = it.currentUser
-                    }
-                    auth.addAuthStateListener(listener)
-                    onDispose {
-                        auth.removeAuthStateListener(listener)
-                    }
-                }
-
-                if (currentUser == null) {
-                    SignInScreen(
-                        onSignInSuccess = {
-                            currentUser = auth.currentUser
-                        }
-                    )
-                } else {
-                    val attendanceViewModel = viewModel<AttendanceViewModel>(
-                        factory = AttendanceViewModel.provideFactory(attendanceRepository)
-                    )
-                    val communicationViewModel = viewModel<CommunicationViewModel>(
-                        factory = CommunicationViewModel.Factory(communicationRepository)
-                    )
-                    val settingsViewModel = viewModel<SettingsViewModel>(
-                        factory = SettingsViewModel.Factory(settingsRepository)
-                    )
-                    val archivesViewModel = viewModel<ArchivesViewModel>(
-                        factory = ArchivesViewModel.Factory(
-                            archiveRepository = archiveRepository,
-                            settingsRepository = settingsRepository,
-                            attendanceRepository = attendanceRepository
+                when (val state = gateState) {
+                    is AuthGateState.Unauthenticated -> {
+                        selectedCompanyMember = null
+                        SignInScreen(
+                            authRepository = authRepository,
+                            onSignInSuccess = { /* gate state auto-resolves */ }
                         )
-                    )
+                    }
+                    is AuthGateState.ActiveWorkspace -> {
+                        val member = state.membership
+                        val companyId = member.companyId
+                        val attendanceViewModel = viewModel<AttendanceViewModel>(
+                            key = "attendance_$companyId",
+                            factory = AttendanceViewModel.provideFactory(attendanceRepository, archiveRepository, settingsRepository, companyId)
+                        )
+                        val communicationViewModel = viewModel<CommunicationViewModel>(
+                            key = "comm_$companyId",
+                            factory = CommunicationViewModel.Factory(communicationRepository, companyId)
+                        )
+                        val settingsViewModel = viewModel<SettingsViewModel>(
+                            key = "settings_$companyId",
+                            factory = SettingsViewModel.Factory(settingsRepository, companyId, authRepository)
+                        )
+                        val archivesViewModel = viewModel<ArchivesViewModel>(
+                            key = "archives_$companyId",
+                            factory = ArchivesViewModel.Factory(archiveRepository, settingsRepository, attendanceRepository, companyId)
+                        )
 
-                    AppMainScaffold(
-                        attendanceViewModel = attendanceViewModel,
-                        communicationViewModel = communicationViewModel,
-                        settingsViewModel = settingsViewModel,
-                        archivesViewModel = archivesViewModel
-                    )
+                        AppMainScaffold(
+                            attendanceViewModel = attendanceViewModel,
+                            communicationViewModel = communicationViewModel,
+                            settingsViewModel = settingsViewModel,
+                            archivesViewModel = archivesViewModel,
+                            activeCompanyMember = member
+                        )
+                    }
+                    is AuthGateState.MultipleCompanies -> {
+                        if (selectedCompanyMember != null && state.memberships.any { it.companyId == selectedCompanyMember!!.companyId }) {
+                            val member = selectedCompanyMember!!
+                            val companyId = member.companyId
+                            val attendanceViewModel = viewModel<AttendanceViewModel>(
+                                key = "attendance_$companyId",
+                                factory = AttendanceViewModel.provideFactory(attendanceRepository, archiveRepository, settingsRepository, companyId)
+                            )
+                            val communicationViewModel = viewModel<CommunicationViewModel>(
+                                key = "comm_$companyId",
+                                factory = CommunicationViewModel.Factory(communicationRepository, companyId)
+                            )
+                            val settingsViewModel = viewModel<SettingsViewModel>(
+                                key = "settings_$companyId",
+                                factory = SettingsViewModel.Factory(settingsRepository, companyId, authRepository)
+                            )
+                            val archivesViewModel = viewModel<ArchivesViewModel>(
+                                key = "archives_$companyId",
+                                factory = ArchivesViewModel.Factory(archiveRepository, settingsRepository, attendanceRepository, companyId)
+                            )
+
+                            AppMainScaffold(
+                                attendanceViewModel = attendanceViewModel,
+                                communicationViewModel = communicationViewModel,
+                                settingsViewModel = settingsViewModel,
+                                archivesViewModel = archivesViewModel,
+                                activeCompanyMember = member
+                            )
+                        } else {
+                            OnboardingGateScreen(
+                                gateState = state,
+                                authRepository = authRepository,
+                                onSelectWorkspace = { selectedCompanyMember = it }
+                            )
+                        }
+                    }
+                    else -> {
+                        selectedCompanyMember = null
+                        OnboardingGateScreen(
+                            gateState = state,
+                            authRepository = authRepository,
+                            onSelectWorkspace = { selectedCompanyMember = it }
+                        )
+                    }
                 }
             }
         }
@@ -143,7 +192,8 @@ private fun AppMainScaffold(
     attendanceViewModel: AttendanceViewModel,
     communicationViewModel: CommunicationViewModel,
     settingsViewModel: SettingsViewModel,
-    archivesViewModel: ArchivesViewModel
+    archivesViewModel: ArchivesViewModel,
+    activeCompanyMember: CompanyMember
 ) {
     val uiState by attendanceViewModel.uiState.collectAsState()
     val commState by communicationViewModel.uiState.collectAsState()
@@ -156,32 +206,51 @@ private fun AppMainScaffold(
                     .background(NabdBone)
                     .statusBarsPadding()
             ) {
-                // Header Suivi: Section Title & Date in French
+                // Header Suivi: Section Title, Workshop info & Date in French
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Start
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = "Suivi",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp
-                            ),
-                            color = NabdObsidian
-                        )
-                        Text(
-                            text = "  •  ${uiState.currentSection.subtitleFr}",
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp
-                            ),
-                            color = NabdPurple
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Suivi",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp
+                                ),
+                                color = NabdObsidian
+                            )
+                            Text(
+                                text = "  •  ${uiState.currentSection.subtitleFr}",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 15.sp
+                                ),
+                                color = NabdPurple
+                            )
+                        }
+
+                        Surface(
+                            color = NabdPurple.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "${activeCompanyMember.companyName} (${activeCompanyMember.role.labelFrench})",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = NabdPurple,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(

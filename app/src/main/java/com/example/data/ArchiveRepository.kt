@@ -26,6 +26,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -57,7 +58,7 @@ class ArchiveRepository(
     /**
      * Live stream of all month closures for a company.
      */
-    fun getMonthClosures(companyId: String = "atelier_nabd_01"): Flow<List<MonthClosureRecord>> {
+    fun getMonthClosures(companyId: String): Flow<List<MonthClosureRecord>> {
         return monthClosureDao.getAllClosures(companyId).map { entities ->
             entities.map { it.toDomain() }
         }.flowOn(Dispatchers.IO)
@@ -66,7 +67,7 @@ class ArchiveRepository(
     /**
      * Live stream of closure for a specific month.
      */
-    fun getMonthClosure(companyId: String = "atelier_nabd_01", yearMonth: String): Flow<MonthClosureRecord?> {
+    fun getMonthClosure(companyId: String, yearMonth: String): Flow<MonthClosureRecord?> {
         return monthClosureDao.getClosureForMonth(companyId, yearMonth).map { it?.toDomain() }.flowOn(Dispatchers.IO)
     }
 
@@ -94,7 +95,7 @@ class ArchiveRepository(
      * Incorporates all workers (both active and historical/archived), confirmed hours, and closure status.
      */
     fun getMonthlyWorkshopArchive(
-        companyId: String = "atelier_nabd_01",
+        companyId: String,
         yearMonth: String
     ): Flow<WorkshopMonthlyArchiveSummary> {
         val workersFlow = workerDao.getAllWorkers().map { list -> list.map { it.toDomain() } }
@@ -253,8 +254,8 @@ class ArchiveRepository(
         reason: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val existing = monthClosureDao.getClosureForMonth(companyId, yearMonth).map { it?.toDomain() }
-            val currentRev = 1 // default revision count
+            val existing = monthClosureDao.getClosureForMonth(companyId, yearMonth).first()
+            val nextRev = (existing?.revisionCount ?: 0) + 1
 
             val record = MonthClosureRecord(
                 yearMonth = yearMonth,
@@ -263,9 +264,9 @@ class ArchiveRepository(
                 closedBy = actorName,
                 closedByRole = actorRole,
                 closedAtEpochMs = System.currentTimeMillis(),
-                revisionCount = currentRev,
+                revisionCount = nextRev,
                 revisionReason = reason.ifBlank { "Révision demandée pour rectification d'heures" },
-                notes = "Mois déverrouillé pour révision"
+                notes = "Mois déverrouillé pour révision (N°$nextRev)"
             )
 
             monthClosureDao.insertOrUpdate(MonthClosureEntity.fromDomain(record))
@@ -278,7 +279,7 @@ class ArchiveRepository(
                     "closedBy" to actorName,
                     "closedByRole" to actorRole.name,
                     "closedAtEpochMs" to record.closedAtEpochMs,
-                    "revisionCount" to currentRev,
+                    "revisionCount" to record.revisionCount,
                     "revisionReason" to record.revisionReason,
                     "notes" to record.notes,
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -318,6 +319,10 @@ class ArchiveRepository(
         notes: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            val existing = monthClosureDao.getClosureForMonth(companyId, yearMonth).first()
+            val currentRev = existing?.revisionCount ?: 1
+            val revReason = existing?.revisionReason ?: "Révision validée"
+
             val record = MonthClosureRecord(
                 yearMonth = yearMonth,
                 companyId = companyId,
@@ -325,9 +330,9 @@ class ArchiveRepository(
                 closedBy = actorName,
                 closedByRole = actorRole,
                 closedAtEpochMs = System.currentTimeMillis(),
-                revisionCount = 1,
-                revisionReason = "Révision validée",
-                notes = notes.ifBlank { "Re-clôture suite à révision approuvée" }
+                revisionCount = currentRev,
+                revisionReason = revReason,
+                notes = notes.ifBlank { "Re-clôture certifiée suite à révision N°$currentRev approuvée" }
             )
 
             monthClosureDao.insertOrUpdate(MonthClosureEntity.fromDomain(record))
@@ -340,7 +345,7 @@ class ArchiveRepository(
                     "closedBy" to actorName,
                     "closedByRole" to actorRole.name,
                     "closedAtEpochMs" to record.closedAtEpochMs,
-                    "revisionCount" to 1,
+                    "revisionCount" to currentRev,
                     "revisionReason" to record.revisionReason,
                     "notes" to record.notes,
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -371,7 +376,7 @@ class ArchiveRepository(
      * Returns the audit log trail specifically tied to archives or this month.
      */
     fun getAuditTrailForMonth(
-        companyId: String = "atelier_nabd_01",
+        companyId: String,
         yearMonth: String
     ): Flow<List<AuditEvent>> {
         return settingsRepository.getAuditEvents(companyId).map { list ->
